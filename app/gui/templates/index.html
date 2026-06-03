@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FRIDAY - AI Personal Assistant</title>
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Orbitron:wght@400;600;800;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+    <!-- Main Style -->
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <!-- Grid Overlay Background -->
+    <div class="hud-grid"></div>
+    <div class="ambient-glow bg-cyan"></div>
+    <div class="ambient-glow bg-purple"></div>
+
+    <div class="hud-container">
+        <!-- Header -->
+        <header class="hud-header">
+            <div class="header-logo">
+                <span class="logo-accent">F.R.I.D.A.Y.</span>
+                <span class="logo-subtitle">MARK I // COGNITIVE SYSTEM</span>
+            </div>
+            <div class="header-status">
+                <div class="status-indicator">
+                    <span class="status-dot pulsing" id="status-dot"></span>
+                    <span class="status-text" id="status-text">SYSTEM SECURE</span>
+                </div>
+                <div class="time-display" id="time-display">00:00:00</div>
+            </div>
+        </header>
+
+        <!-- Main Workspace -->
+        <main class="hud-main">
+            <!-- Left Side: Diagnostics and Logs -->
+            <section class="hud-column left-col">
+                <!-- System Status Panel -->
+                <div class="hud-panel glass-panel" id="panel-status">
+                    <div class="panel-header">
+                        <span class="panel-title">SYSTEM DIAGNOSTICS</span>
+                        <span class="panel-tag">// DIAG.01</span>
+                    </div>
+                    <div class="panel-body diagnostics-grid">
+                        <div class="diag-item">
+                            <span class="diag-label">PRIMARY BRAIN</span>
+                            <span class="diag-val cyan-text" id="diag-brain">GEMINI 1.5 FLASH</span>
+                        </div>
+                        <div class="diag-item">
+                            <span class="diag-label">SPEECH RECOG.</span>
+                            <span class="diag-val cyan-text" id="diag-stt">WHISPER API</span>
+                        </div>
+                        <div class="diag-item">
+                            <span class="diag-label">VOICE OUTPUT</span>
+                            <span class="diag-val cyan-text" id="diag-tts">EDGE-TTS (SONIA)</span>
+                        </div>
+                        <div class="diag-item">
+                            <span class="diag-label">DATABASE</span>
+                            <span class="diag-val purple-text" id="diag-db">CHROMADB + SQLITE</span>
+                        </div>
+                        <div class="diag-item">
+                            <span class="diag-label">OS PLATFORM</span>
+                            <span class="diag-val" id="diag-os">WINDOWS</span>
+                        </div>
+                        <div class="diag-item">
+                            <span class="diag-label">ACTIVE MODULES</span>
+                            <span class="diag-val positive" id="diag-modules">PHASE 1 CORE</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Console Stream Panel -->
+                <div class="hud-panel glass-panel flex-grow" id="panel-console">
+                    <div class="panel-header">
+                        <span class="panel-title">CONSOLE STREAM</span>
+                        <span class="panel-tag">// LOGS.EXE</span>
+                    </div>
+                    <div class="panel-body console-body" id="console-stream">
+                        <div class="console-line system">[SYSTEM] F.R.I.D.A.Y. Core booting up...</div>
+                        <div class="console-line system">[SYSTEM] Loading neural pathways... Done.</div>
+                        <div class="console-line positive">[READY] Cognitive framework fully online, Sir.</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Center: Core Interface & Waveform -->
+            <section class="hud-column center-col">
+                <div class="core-container">
+                    <!-- Holographic Arc Reactor Core -->
+                    <div class="arc-reactor" id="arc-core">
+                        <div class="reactor-outer-ring"></div>
+                        <div class="reactor-ring-dots"></div>
+                        <div class="reactor-inner-ring"></div>
+                        <div class="reactor-core-glow"></div>
+                        <div class="reactor-center">
+                            <div class="reactor-symbol">F</div>
+                        </div>
+                    </div>
+
+                    <!-- Speech Waves Visualizer -->
+                    <div class="visualizer-wrapper">
+                        <div class="sound-waves" id="sound-waves">
+                            <span class="bar"></span>
+                            <span class="bar"></span>
+                            <span class="bar"></span>
+                            <span class="bar"></span>
+                            <span class="bar"></span>
+                            <span class="bar"></span>
+                            <span class="bar"></span>
+                            <span class="bar"></span>
+                            <span class="bar"></span>
+                            <span class="bar"></span>
+                            <span class="bar"></span>
+                            <span class="bar"></span>
+                            <span class="bar"></span>
+                            <span class="bar"></span>
+                            <span class="bar"></span>
+                        </div>
+                    </div>
+
+                    <div class="core-status-text" id="core-action-text">STANDBY // LISTENING FOR INPUT</div>
+                </div>
+
+                <!-- Central Control Panel -->
+                <div class="central-actions glass-panel">
+                    <button class="control-btn" id="btn-mic" title="Voice Input">
+                        <svg viewBox="0 0 24 24" class="icon">
+                            <path fill="currentColor" d="M12,2A3,3 0 0,1 15,5V11A3,3 0 0,1 12,14A3,3 0 0,1 9,11V5A3,3 0 0,1 12,2M19,11C19,14.53 16.39,17.44 13,17.93V21H11V17.93C7.61,17.44 5,14.53 5,11H7A5,5 0 0,0 12,16A5,5 0 0,0 17,11H19Z" />
+                        </svg>
+                        <span class="btn-label" id="mic-status-label">HOLD TO TALK</span>
+                    </button>
+                    
+                    <button class="control-btn danger-btn" id="btn-clear-mem" title="Clear Memory">
+                        <svg viewBox="0 0 24 24" class="icon">
+                            <path fill="currentColor" d="M19 4h-3.5l-1-1h-5l-1 1H5v2h14M6 19a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7H6v12Z" />
+                        </svg>
+                        <span class="btn-label">PURGE MEMORY</span>
+                    </button>
+                </div>
+            </section>
+
+            <!-- Right Side: Cognitive Chat Interface -->
+            <section class="hud-column right-col">
+                <div class="hud-panel glass-panel chat-panel flex-grow" id="panel-chat">
+                    <div class="panel-header">
+                        <span class="panel-title">COMMUNICATION MATRIX</span>
+                        <span class="panel-tag">// COM.01</span>
+                    </div>
+                    
+                    <div class="panel-body chat-messages" id="chat-messages">
+                        <div class="chat-bubble assistant">
+                            <div class="bubble-sender">FRIDAY</div>
+                            <div class="bubble-content">Good afternoon, Sir. Systems are initialized. How can I assist you today?</div>
+                            <div class="bubble-time">15:52</div>
+                        </div>
+                    </div>
+
+                    <!-- Chat Input Field -->
+                    <div class="chat-input-wrapper">
+                        <form id="chat-form" onsubmit="event.preventDefault();">
+                            <input type="text" id="chat-input" placeholder="Transmit instruction, Sir..." autocomplete="off">
+                            <button type="submit" id="btn-send-chat" title="Send Transmit">
+                                <svg viewBox="0 0 24 24" class="icon">
+                                    <path fill="currentColor" d="M2,21L23,12L2,3V10L17,12L2,14V21Z" />
+                                </svg>
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Hidden audio element for speech playback -->
+    <audio id="tts-audio" style="display: none;"></audio>
+
+    <!-- Main JavaScript Logic -->
+    <script src="/static/js/main.js"></script>
+</body>
+</html>

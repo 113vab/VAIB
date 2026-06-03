@@ -1,0 +1,1 @@
+# FRIDAY Assistant App Package

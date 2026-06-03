@@ -1,0 +1,21 @@
+# F.R.I.D.A.Y. AI Assistant - GitHub Repository Details
+
+## Short Description / Tagline
+A voice-first personal AI assistant for Windows, inspired by Iron Man's F.R.I.D.A.Y. Built with a FastAPI backend, ChromaDB persistent memory, local offline Whisper speech-to-text, and a stunning cyberpunk glassmorphic HUD dashboard.
+
+---
+
+## Repository Topics / Tags
+`personal-assistant` `voice-assistant` `gemini-api` `fastapi` `chromadb` `faster-whisper` `speech-to-text` `text-to-speech` `windows-automation` `glassmorphism` `cyberpunk` `agentic-ai` `jarvis-assistant`
+
+---
+
+## Detailed Repository Description
+**F.R.I.D.A.Y. (Female Replacement Intelligent Digital Assistant Youth)** is a production-ready, modular personal AI assistant engineered for Windows. Combining the reasoning capabilities of Google's Gemini models with a high-fidelity visual dashboard and local offline voice recognition, FRIDAY acts as a proactive digital partner.
+
+### Key Highlights:
+* 🤖 **Gemini 2.5 Flash Cognitive Brain**: Implements dynamic system instruction, contextual prompt injection, and recursive tool calling.
+* 🎙️ **Local offline Speech-to-Text**: Utilizes `faster-whisper` running a quantized CPU-optimized `tiny` model locally, removing cloud STT costs. Includes client-side browser Web Speech API fallbacks.
+* 🔊 **Natural Vocal Output**: Integrates Microsoft's free `edge-tts` to synthesize speech using the elegant British `en-GB-SoniaNeural` voice profile.
+* 🧠 **Persistent Context & Memory**: Implements a SQLite chat log database for chronological history and a ChromaDB vector store for semantic long-term user fact indexing.
+* 🛸 **Holographic Glassmorphic HUD**: Responsive web-based frontend serving animated core reactor states, sound wave visualizers, real-time logging terminal simulation, hold-to-talk microphone inputs, and instant audio interruptions.
