@@ -1,1 +1,1 @@
-# FRIDAY Test Suite
+# V.A.I.B. Test Suite

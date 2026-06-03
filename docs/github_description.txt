@@ -1,7 +1,7 @@
-# F.R.I.D.A.Y. AI Assistant - GitHub Repository Details
+# V.A.I.B. AI Assistant - GitHub Repository Details
 
 ## Short Description / Tagline
-A voice-first personal AI assistant for Windows, inspired by Iron Man's F.R.I.D.A.Y. Built with a FastAPI backend, ChromaDB persistent memory, local offline Whisper speech-to-text, and a stunning cyberpunk glassmorphic HUD dashboard.
+A voice-first personal AI assistant for Windows, inspired by Marvel's JARVIS. Built with a FastAPI backend, ChromaDB persistent memory, local offline Whisper speech-to-text, and a stunning cyberpunk glassmorphic HUD dashboard.
 
 ---
 
@@ -11,7 +11,7 @@ A voice-first personal AI assistant for Windows, inspired by Iron Man's F.R.I.D.
 ---
 
 ## Detailed Repository Description
-**F.R.I.D.A.Y. (Female Replacement Intelligent Digital Assistant Youth)** is a production-ready, modular personal AI assistant engineered for Windows. Combining the reasoning capabilities of Google's Gemini models with a high-fidelity visual dashboard and local offline voice recognition, FRIDAY acts as a proactive digital partner.
+**V.A.I.B. (Virtual Artificial Intelligence Brain)** is a production-ready, modular personal AI assistant engineered for Windows. Combining the reasoning capabilities of Google's Gemini models with a high-fidelity visual dashboard and local offline voice recognition, V.A.I.B. acts as a proactive digital partner.
 
 ### Key Highlights:
 * 🤖 **Gemini 2.5 Flash Cognitive Brain**: Implements dynamic system instruction, contextual prompt injection, and recursive tool calling.

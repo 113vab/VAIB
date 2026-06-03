@@ -11,20 +11,20 @@ from pydantic import BaseModel
 
 from app.config import logger, PORT, HOST, DATA_DIR
 from app.brain.memory import MemoryManager
-from app.brain.agent import FridayAgent
+from app.brain.agent import VaibAgent
 from app.voice.tts import TTSManager
 from app.voice.stt import STTManager
 
 # Initialize components
-logger.info("Initializing FRIDAY core systems...")
+logger.info("Initializing V.A.I.B. core systems...")
 memory = MemoryManager()
-agent = FridayAgent(memory)
+agent = VaibAgent(memory)
 tts = TTSManager()
 stt = STTManager()
 
 app = FastAPI(
-    title="FRIDAY Personal AI Assistant",
-    description="Inspired by Marvel's JARVIS, FRIDAY is a voice-first AI assistant for Windows.",
+    title="V.A.I.B. Personal AI Assistant",
+    description="Inspired by Marvel's JARVIS, V.A.I.B. is a voice-first AI assistant for Windows.",
     version="1.0.0"
 )
 

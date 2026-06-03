@@ -1,4 +1,4 @@
-// FRIDAY Core HUD JavaScript Logic
+// V.A.I.B. Core HUD JavaScript Logic
 
 document.addEventListener("DOMContentLoaded", () => {
     // UI Elements
@@ -224,7 +224,7 @@ document.addEventListener("DOMContentLoaded", () => {
         
         const sender = document.createElement("div");
         sender.className = "bubble-sender";
-        sender.textContent = role === "user" ? "USER" : "FRIDAY";
+        sender.textContent = role === "user" ? "USER" : "V.A.I.B.";
         
         const body = document.createElement("div");
         body.className = "bubble-content";
@@ -418,6 +418,6 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     // Notify user initialization is complete
-    addLog("[SYSTEM] FRIDAY cognitive matrix ready.", "positive");
+    addLog("[SYSTEM] V.A.I.B. cognitive matrix ready.", "positive");
     setUIState("standby");
 });

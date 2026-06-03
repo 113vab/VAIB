@@ -1,1 +1,1 @@
-# FRIDAY Tools Package
+# V.A.I.B. Tools Package

@@ -1,4 +1,4 @@
-# F.R.I.D.A.Y. - Future Roadmap (Phase 2 & Phase 3)
+# V.A.I.B. - Future Roadmap (Phase 2 & Phase 3)
 
 Following the successful completion of **Phase 1 (Brain & Memory Core)**, this document outlines the developmental path for subsequent phases.
 
@@ -6,11 +6,11 @@ Following the successful completion of **Phase 1 (Brain & Memory Core)**, this d
 
 ## Phase 2: Computer Control & Automation (Milestones)
 
-The objective of Phase 2 is to give FRIDAY hands-on capabilities to manipulate files, run commands, and automate web interactions.
+The objective of Phase 2 is to give V.A.I.B. hands-on capabilities to manipulate files, run commands, and automate web interactions.
 
 ```mermaid
 graph TD
-    Agent[FRIDAY Brain] -->|Tool Invocation| Control[Control Orchestrator]
+    Agent[V.A.I.B. Brain] -->|Tool Invocation| Control[Control Orchestrator]
     Control --> FileSys[File System CRUD]
     Control --> Shell[Secure PowerShell Shell]
     Control --> Browser[Playwright Web Browser]
@@ -20,7 +20,7 @@ graph TD
 ```
 
 ### 1. Secure Shell Execution
-- **Features**: Implement a tool allowing FRIDAY to execute command-line scripts in Windows PowerShell.
+- **Features**: Implement a tool allowing V.A.I.B. to execute command-line scripts in Windows PowerShell.
 - **Security Checkpoints**:
   - Integrate a safety policy. Any system-modifying or terminal command requires explicit user confirmation (via a pop-up prompt in the HUD or a voice confirmation loop like "Yes, proceed").
   - Blacklist dangerous commands (e.g., formatting drives, clearing system registries).
@@ -39,13 +39,13 @@ graph TD
   - Extract structured page text and feeds to synthesize summaries.
 
 ### 4. Windows Application Launcher
-- **Features**: Open system executables (e.g., Notepad, Chrome, Calculator, VS Code) using Python's `subprocess` module by mapping simple spoken commands (e.g., "FRIDAY, open Notepad").
+- **Features**: Open system executables (e.g., Notepad, Chrome, Calculator, VS Code) using Python's `subprocess` module by mapping simple spoken commands (e.g., "Hey VAIB, open Notepad").
 
 ---
 
 ## Phase 3: Productivity & Extensible Plugins (Milestones)
 
-The objective of Phase 3 is to make FRIDAY a powerful daily productivity partner with an extensible plugin architecture.
+The objective of Phase 3 is to make V.A.I.B. a powerful daily productivity partner with an extensible plugin architecture.
 
 ### 1. Vision & Screen OCR
 - **Webcam Support**: Capture frames from local camera input using OpenCV to analyze items or recognize the user.
@@ -58,8 +58,8 @@ The objective of Phase 3 is to make FRIDAY a powerful daily productivity partner
 - **Email Drafter**: Formulate SMTP drafts or integrate API endpoints to read headers.
 
 ### 3. Modular Plugin Architecture
-- **Plugin Loader**: Allow developers to extend FRIDAY's tools by dropping custom python scripts into a `/plugins/` folder.
-- **Dynamic Bindings**: Auto-discover tools marked with custom decorators (e.g., `@friday_tool`) and bind their schemas dynamically to the Gemini GenerativeModel at server startup.
+- **Plugin Loader**: Allow developers to extend V.A.I.B.'s tools by dropping custom python scripts into a `/plugins/` folder.
+- **Dynamic Bindings**: Auto-discover tools marked with custom decorators (e.g., `@vaib_tool`) and bind their schemas dynamically to the Gemini GenerativeModel at server startup.
 
 ---
 

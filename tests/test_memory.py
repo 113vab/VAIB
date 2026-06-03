@@ -33,14 +33,14 @@ def test_sqlite_chat_history(test_env):
     assert len(history) == 0
     
     # Save messages
-    memory.add_chat_message("user", "Hello Friday")
+    memory.add_chat_message("user", "Hello VAIB")
     memory.add_chat_message("assistant", "Hello Sir, how can I help?")
     
     # Retrieve messages
     history = memory.get_chat_history(limit=5)
     assert len(history) == 2
     assert history[0]["role"] == "user"
-    assert history[0]["content"] == "Hello Friday"
+    assert history[0]["content"] == "Hello VAIB"
     assert history[1]["role"] == "assistant"
     assert history[1]["content"] == "Hello Sir, how can I help?"
     

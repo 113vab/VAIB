@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import MagicMock, patch, AsyncMock
-from app.brain.agent import FridayAgent
+from app.brain.agent import VaibAgent
 from app.brain.memory import MemoryManager
 
 @pytest.fixture
@@ -13,7 +13,7 @@ def mock_memory():
 
 def test_agent_tool_calling(mock_memory):
     """Test tool execution logic locally in agent."""
-    agent = FridayAgent(mock_memory)
+    agent = VaibAgent(mock_memory)
     
     # Test system status
     status = agent.execute_tool("get_system_status", {})
@@ -36,6 +36,6 @@ def test_agent_tool_calling(mock_memory):
 async def test_agent_generate_response_offline(mock_memory):
     """Test response generation fallback when Gemini model is offline (API key missing)."""
     with patch("app.brain.agent.GEMINI_API_KEY", ""):
-        agent = FridayAgent(mock_memory)
-        response = await agent.generate_response("Hello Friday")
-        assert "My neural network is offline" in response or "API key" in response
+        agent = VaibAgent(mock_memory)
+        response = await agent.generate_response("Hello VAIB")
+        assert "simulation mode" in response or "API key" in response

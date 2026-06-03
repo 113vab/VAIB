@@ -12,7 +12,7 @@ else:
 
 # App paths
 BASE_DIR = Path(__file__).resolve().parent.parent
-DATA_DIR = BASE_DIR.parent / 'friday_data'
+DATA_DIR = BASE_DIR.parent / 'vaib_data'
 DATA_DIR.mkdir(exist_ok=True)
 
 # Configurations
@@ -31,9 +31,9 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler(DATA_DIR / "friday.log", encoding="utf-8")
+        logging.FileHandler(DATA_DIR / "vaib.log", encoding="utf-8")
     ]
 )
 
-logger = logging.getLogger("friday")
+logger = logging.getLogger("vaib")
 logger.info("Configuration loaded. Data directory at: %s", DATA_DIR)

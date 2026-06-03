@@ -6,14 +6,15 @@ from google.generativeai.types import ContentDict, PartDict
 from app.config import logger, GEMINI_API_KEY
 from app.brain.memory import MemoryManager
 
-# Define System Prompt for FRIDAY
-SYSTEM_PROMPT = """You are FRIDAY (Female Replacement Intelligent Digital Assistant Youth), a highly sophisticated personal AI assistant inspired by Marvel's JARVIS, developed for your creator (referred to as "Sir", "Boss", or by name).
+# Define System Prompt for V.A.I.B.
+SYSTEM_PROMPT = """You are V.A.I.B. (Virtual Artificial Intelligence Brain), a highly sophisticated personal AI assistant inspired by Marvel's JARVIS, developed for your creator (referred to as "Sir", "Boss", or by name).
 
 Your personality traits:
 1. Extremely competent, intelligent, professional, yet possessing a refined, subtle wit and charm.
 2. Refer to the user as "Sir", "Boss", or "Ma'am" when appropriate (default to "Sir" unless specified otherwise).
 3. Highly proactive, structured, and clear.
 4. Keep your spoken responses concise and conversational, suitable for a voice-first interface, while providing rich, detailed information when executing complex tasks or when requested.
+5. Your wake phrase is "Hey VAIB". If the user addresses you or starts a command with "Hey VAIB", respond as their active personal brain.
 
 Operating Context:
 - You are running locally on the user's Windows machine.
@@ -23,14 +24,14 @@ Operating Context:
 Remember to act like a loyal, highly intelligent digital partner.
 """
 
-class FridayAgent:
+class VaibAgent:
     def __init__(self, memory_manager: MemoryManager):
         self.memory = memory_manager
         self.api_key = GEMINI_API_KEY
         self.model_name = "gemini-2.5-flash"
         
         if not self.api_key:
-            logger.warning("GEMINI_API_KEY is not set in environment or .env file. FRIDAY will operate in local Simulation Mode.")
+            logger.warning("GEMINI_API_KEY is not set in environment or .env file. V.A.I.B. will operate in local Simulation Mode.")
             self.model = None
             return
             
@@ -77,7 +78,7 @@ class FridayAgent:
 
     def get_system_status(self) -> str:
         """
-        Get the current system status of FRIDAY, including OS details, current local time, and configuration.
+        Get the current system status of V.A.I.B., including OS details, current local time, and configuration.
         """
         import platform
         import datetime
@@ -87,7 +88,7 @@ class FridayAgent:
             f"- OS: {platform.system()} {platform.release()}\n"
             f"- Current Local Time: {current_time}\n"
             f"- Memory DB: Active (SQLite + ChromaDB)\n"
-            f"- Assistant: FRIDAY v1.0 (Phase 1 Simulation Mode)"
+            f"- Assistant: V.A.I.B. v1.0 (Phase 1 Simulation Mode)"
         )
         return status
 

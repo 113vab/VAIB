@@ -11,7 +11,7 @@ class TTSManager:
         # Default output directory is in gui static folders or data dir
         self.output_dir = output_dir or DATA_DIR / "audio_cache"
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        # en-GB-SoniaNeural provides a elegant British accent fitting for FRIDAY
+        # en-GB-SoniaNeural provides an elegant British accent fitting for V.A.I.B.
         self.default_voice = "en-GB-SoniaNeural"
         self._cleanup_old_audio()
 

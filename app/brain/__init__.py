@@ -1,1 +1,1 @@
-# FRIDAY Brain Module
+# V.A.I.B. Brain Module

@@ -32,7 +32,7 @@ class GeminiEmbeddingFunction(EmbeddingFunction):
             return [[0.0] * 768 for _ in input]
 
 class MemoryManager:
-    """Manages FRIDAY's memory: SQLite for chat logs, ChromaDB for semantic facts."""
+    """Manages V.A.I.B.'s memory: SQLite for chat logs, ChromaDB for semantic facts."""
     def __init__(self):
         self.db_path = DATA_DIR / "history.db"
         self._init_sqlite()
@@ -69,10 +69,10 @@ class MemoryManager:
             
             # Create or get collection for long term memories
             self.facts_collection = self.chroma_client.get_or_create_collection(
-                name="friday_facts",
+                name="vaib_facts",
                 embedding_function=self.emb_fn
             )
-            logger.info("ChromaDB initialized with collection 'friday_facts'.")
+            logger.info("ChromaDB initialized with collection 'vaib_facts'.")
         except Exception as e:
             logger.error(f"Failed to initialize ChromaDB: {e}")
             self.chroma_client = None
@@ -170,9 +170,9 @@ class MemoryManager:
         if not self.chroma_client or not self.facts_collection:
             return
         try:
-            self.chroma_client.delete_collection("friday_facts")
+            self.chroma_client.delete_collection("vaib_facts")
             self.facts_collection = self.chroma_client.create_collection(
-                name="friday_facts",
+                name="vaib_facts",
                 embedding_function=self.emb_fn
             )
             logger.info("Long-term memories cleared.")

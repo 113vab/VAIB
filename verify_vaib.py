@@ -26,20 +26,20 @@ def make_request(path, data=None):
         return None
 
 if __name__ == "__main__":
-    print("--- COMMENCING F.R.I.D.A.Y. LOCAL VERIFICATION ---")
+    print("--- COMMENCING V.A.I.B. LOCAL VERIFICATION ---")
     time.sleep(2)  # Wait for server stability
     
     # 1. Verify dashboard loads
     print("\n1. Verifying Dashboard loads...")
     html = make_request("/")
-    if html and "F.R.I.D.A.Y." in html:
-        print("SUCCESS: Dashboard index loaded and contains FRIDAY tags.")
+    if html and "V.A.I.B." in html:
+        print("SUCCESS: Dashboard index loaded and contains V.A.I.B. tags.")
     else:
         print("FAIL: Dashboard failed to load.")
         
     # 2. Verify Gemini chat works (in simulation mode fallback)
     print("\n2. Verifying Chat Endpoint...")
-    chat_res = make_request("/api/chat", {"message": "Hello FRIDAY"})
+    chat_res = make_request("/api/chat", {"message": "Hello VAIB"})
     if chat_res and "response" in chat_res:
         print(f"SUCCESS: Chat returned: '{chat_res['response']}'")
     else:

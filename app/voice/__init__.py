@@ -1,1 +1,1 @@
-# FRIDAY Voice Module
+# V.A.I.B. Voice Module

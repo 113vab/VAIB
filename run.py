@@ -17,7 +17,7 @@ def open_browser():
         logger.error(f"Failed to open browser automatically: {e}")
 
 if __name__ == "__main__":
-    logger.info("Initializing F.R.I.D.A.Y. Cognitive System...")
+    logger.info("Initializing V.A.I.B. Cognitive System...")
     
     # Start thread to open browser
     threading.Thread(target=open_browser, daemon=True).start()

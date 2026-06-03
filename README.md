@@ -1,10 +1,8 @@
-# F.R.I.D.A.Y. - Personal AI Assistant (Gemini Only Stack)
+# V.A.I.B. - Personal AI Assistant (Gemini Only Stack)
 
-FRIDAY (Female Replacement Intelligent Digital Assistant Youth) is a voice-first personal AI assistant for Windows, inspired by Marvel's JARVIS/FRIDAY. It is built with a FastAPI backend, a sleek holographic glassmorphic UI dashboard, ChromaDB for semantic long-term memory, and SQLite for chat log history.
+V.A.I.B. (Virtual Artificial Intelligence Brain) is a voice-first personal AI assistant for Windows, inspired by Marvel's JARVIS. It is built with a FastAPI backend, a sleek holographic glassmorphic UI dashboard, ChromaDB for semantic long-term memory, and SQLite for chat log history.
 
 This stack is configured to make **Google Gemini the sole required AI provider**. All speech-to-text is executed locally offline.
-
-![FRIDAY HUD Dashboard](docs/assets/dashboard_mockup.png)
 
 ## Core Features (Phase 1)
 - **Primary AI Brain & Embeddings**: Powered by Google Gemini (`gemini-2.5-flash`), with system instruction control, chat history tracking, and active tool calling.
@@ -12,6 +10,7 @@ This stack is configured to make **Google Gemini the sole required AI provider**
 - **Voice Output**: Natural-sounding English voice via `edge-tts` (using `en-GB-SoniaNeural` for an elegant British accent).
 - **Persistent Memory**: SQLite database for sequential conversation history and ChromaDB vector store for long-term user facts and preferences.
 - **Desktop HUD Interface**: A gorgeous, holographic, responsive Web-based desktop dashboard with real-time diagnostics, system console logs, sound waves visualizer, and hold-to-talk mic button.
+- **Wake Phrase**: Supports "Hey VAIB" as the wake phrase for instructions.
 
 ---
 
@@ -47,7 +46,7 @@ C:\Users\visha\friday\
 ├── requirements.txt           # Project dependencies
 ├── .env.example               # Environment variables configuration example
 ├── run.py                     # Convenience startup script (launches server and browser)
-└── architecture.md            # Technical architecture documentation
+└── verify_vaib.py             # Local verification script
 ```
 
 ---
@@ -92,7 +91,7 @@ Start the assistant using the runner script:
 ```bash
 python run.py
 ```
-This script will start the FastAPI backend server on `http://127.0.0.1:8000` and automatically open your default browser to launch the FRIDAY HUD interface. On the first voice transcription request, the backend will download the tiny local Whisper model (~39MB) to perform local offline transcriptions.
+This script will start the FastAPI backend server on `http://127.0.0.1:8000` and automatically open your default browser to launch the V.A.I.B. HUD interface. On the first voice transcription request, the backend will download the tiny local Whisper model (~39MB) to perform local offline transcriptions.
 
 ### UI Controls
 - **Chat Input**: Type your instructions and press Enter (or click the Send button).

@@ -1,1 +1,1 @@
-# FRIDAY Assistant App Package
+# V.A.I.B. Assistant App Package
