@@ -24,6 +24,10 @@ document.addEventListener("DOMContentLoaded", () => {
     const statusDot = document.getElementById("status-dot");
     const statusText = document.getElementById("status-text");
 
+    // Permissions Elements
+    const panelPermissions = document.getElementById("panel-permissions");
+    const pendingPermissionsList = document.getElementById("pending-permissions-list");
+
     // Recording State Variables
     let mediaRecorder = null;
     let audioChunks = [];
@@ -37,6 +41,10 @@ document.addEventListener("DOMContentLoaded", () => {
     startClock();
     fetchDiagnostics();
     initWebSpeechRecognition();
+    fetchPendingPermissions();
+    
+    // Poll for pending permissions every 3 seconds
+    setInterval(fetchPendingPermissions, 3000);
 
     // ----------------------------------------------------
     // Clock HUD Display
@@ -210,6 +218,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
+    // Helper logger
     function loggerError(context, err) {
         addLog(`[ERROR] ${context}: ${err.message || err}`, "error");
         console.error(context, err);
@@ -416,6 +425,96 @@ document.addEventListener("DOMContentLoaded", () => {
             }
         }
     });
+
+    // ----------------------------------------------------
+    // Pending Permission Confirmations
+    // ----------------------------------------------------
+    async function fetchPendingPermissions() {
+        try {
+            const res = await fetch("/api/permissions/pending");
+            if (!res.ok) return;
+            const pending = await res.json();
+            
+            if (pending.length === 0) {
+                panelPermissions.style.display = "none";
+                return;
+            }
+            
+            panelPermissions.style.display = "block";
+            pendingPermissionsList.innerHTML = "";
+            
+            pending.forEach(action => {
+                const card = document.createElement("div");
+                card.style.background = "rgba(255, 255, 255, 0.03)";
+                card.style.border = "1px solid rgba(0, 240, 255, 0.2)";
+                card.style.padding = "10px";
+                card.style.borderRadius = "4px";
+                card.style.display = "flex";
+                card.style.flexDirection = "column";
+                card.style.gap = "8px";
+                card.style.marginBottom = "8px";
+                
+                card.innerHTML = `
+                    <div style="font-family: 'Share Tech Mono', monospace; font-size: 0.85rem; color: #00f0ff; text-transform: uppercase; font-weight: bold; border-bottom: 1px solid rgba(0, 240, 255, 0.1); padding-bottom: 4px;">
+                        ${action.type.replace("_", " ")}
+                    </div>
+                    <div style="font-family: 'Share Tech Mono', monospace; font-size: 0.75rem; color: #c0c0c0; word-break: break-all; max-height: 80px; overflow-y: auto;">
+                        ${JSON.stringify(action.details).replace(/[\{\}\"]/g, "").replace(/:/g, ": ")}
+                    </div>
+                    <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 4px;">
+                        <button class="approve-btn" data-id="${action.id}" style="background: rgba(0, 240, 255, 0.1); border: 1px solid #00f0ff; color: #00f0ff; padding: 4px 10px; font-family: 'Share Tech Mono', monospace; font-size: 0.75rem; cursor: pointer; border-radius: 2px;">APPROVE</button>
+                        <button class="deny-btn" data-id="${action.id}" style="background: rgba(255, 0, 85, 0.1); border: 1px solid #ff0055; color: #ff0055; padding: 4px 10px; font-family: 'Share Tech Mono', monospace; font-size: 0.75rem; cursor: pointer; border-radius: 2px;">DENY</button>
+                    </div>
+                `;
+                
+                // Add button handlers
+                const approveBtn = card.querySelector(".approve-btn");
+                const denyBtn = card.querySelector(".deny-btn");
+                
+                approveBtn.addEventListener("click", async () => {
+                    const id = approveBtn.getAttribute("data-id");
+                    addLog(`[SYSTEM] Approving action ${action.type}...`);
+                    try {
+                        const postRes = await fetch(`/api/permissions/approve/${id}`, { method: "POST" });
+                        const data = await postRes.json();
+                        if (postRes.ok) {
+                            addLog(`[SYSTEM] Action ${action.type} approved and executed.`, "positive");
+                            appendChatBubble("assistant", `[APPROVED] Action executed: ${data.result}`);
+                            await playTTS(data.result);
+                        } else {
+                            throw new Error(data.detail || "Approval execution failed");
+                        }
+                    } catch (err) {
+                        loggerError("Approval failed", err);
+                    }
+                    fetchPendingPermissions();
+                });
+                
+                denyBtn.addEventListener("click", async () => {
+                    const id = denyBtn.getAttribute("data-id");
+                    addLog(`[SYSTEM] Denying action ${action.type}...`, "error");
+                    try {
+                        const postRes = await fetch(`/api/permissions/deny/${id}`, { method: "POST" });
+                        if (postRes.ok) {
+                            addLog(`[SYSTEM] Action ${action.type} denied by user.`, "system");
+                            appendChatBubble("assistant", `[DENIED] Action was rejected, Sir.`);
+                            await playTTS("Action rejected.");
+                        } else {
+                            const data = await postRes.json();
+                            throw new Error(data.detail || "Deny request failed");
+                        }
+                    } catch (err) {
+                        loggerError("Denial failed", err);
+                    }
+                    fetchPendingPermissions();
+                });
+                
+                pendingPermissionsList.appendChild(card);
+            });
+        } catch (err) {
+            console.error("Failed to fetch pending permissions:", err);
+        }
+    }
 
     // Notify user initialization is complete
     addLog("[SYSTEM] V.A.I.B. cognitive matrix ready.", "positive");

@@ -14,6 +14,7 @@ from app.brain.memory import MemoryManager
 from app.brain.agent import VaibAgent
 from app.voice.tts import TTSManager
 from app.voice.stt import STTManager
+from app.tools import PermissionsManager
 
 # Initialize components
 logger.info("Initializing V.A.I.B. core systems...")
@@ -60,7 +61,12 @@ STATIC_DIR.mkdir(parents=True, exist_ok=True)
 TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
 
 # Mount audio cache for generated speech
+(DATA_DIR / "audio_cache").mkdir(parents=True, exist_ok=True)
 app.mount("/audio-cache", StaticFiles(directory=str(DATA_DIR / "audio_cache")), name="audio-cache")
+
+# Mount screenshots directory
+(DATA_DIR / "screenshots").mkdir(parents=True, exist_ok=True)
+app.mount("/screenshots", StaticFiles(directory=str(DATA_DIR / "screenshots")), name="screenshots")
 
 # Endpoints
 @app.get("/", response_class=HTMLResponse)
@@ -105,7 +111,6 @@ async def stt_endpoint(file: UploadFile = File(...)):
         transcription = await stt.transcribe_audio(temp_path)
         return {"text": transcription}
     except ValueError as ve:
-        # Key missing error
         logger.warning(f"Whisper STT Configuration Error: {ve}")
         raise HTTPException(status_code=400, detail="STT_KEY_MISSING")
     except Exception as e:
@@ -147,6 +152,49 @@ async def clear_memory_endpoint():
     except Exception as e:
         logger.error(f"Error clearing memory: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# Permission endpoints
+
+@app.get("/api/permissions/pending")
+async def get_pending_permissions():
+    """Get list of actions currently awaiting user approval."""
+    pm = PermissionsManager()
+    return pm.get_pending_actions()
+
+@app.post("/api/permissions/approve/{action_id}")
+async def approve_permission(action_id: str):
+    """Approve a pending action and execute it."""
+    pm = PermissionsManager()
+    status = pm.get_action_status(action_id)
+    if status.get("status") == "not_found":
+         raise HTTPException(status_code=404, detail="Action not found")
+         
+    res = pm.approve_action(action_id)
+    if res.get("status") == "success":
+         action_type = status.get("type", "action")
+         result_val = res.get("result", "")
+         # Add record of approval outcome in SQLite log
+         memory.add_chat_message("assistant", f"[APPROVED] Action '{action_type}' executed: {result_val}")
+         return res
+    else:
+         raise HTTPException(status_code=400, detail=res.get("error", "Execution failed"))
+
+@app.post("/api/permissions/deny/{action_id}")
+async def deny_permission(action_id: str):
+    """Deny and discard a pending action."""
+    pm = PermissionsManager()
+    status = pm.get_action_status(action_id)
+    if status.get("status") == "not_found":
+         raise HTTPException(status_code=404, detail="Action not found")
+         
+    res = pm.deny_action(action_id)
+    if res.get("status") == "success":
+         action_type = status.get("type", "action")
+         # Add record of denial in SQLite log
+         memory.add_chat_message("assistant", f"[DENIED] Action '{action_type}' rejected.")
+         return res
+    else:
+         raise HTTPException(status_code=400, detail=res.get("message", "Denial failed"))
 
 @app.get("/api/status")
 async def status_endpoint():
