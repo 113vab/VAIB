@@ -82,6 +82,36 @@
                     </div>
                 </div>
 
+                <!-- Cognitive Memory Panel -->
+                <div class="hud-panel glass-panel" id="panel-memory" style="margin-bottom: 15px; max-height: 350px; display: flex; flex-direction: column;">
+                    <div class="panel-header">
+                        <span class="panel-title">COGNITIVE MEMORY</span>
+                        <span class="panel-tag">// MEM.01</span>
+                    </div>
+                    <div class="panel-body memory-body" style="padding: 10px; overflow-y: auto; flex-grow: 1; font-size: 13px;">
+                        <!-- Profile section -->
+                        <div class="memory-section" style="margin-bottom: 15px;">
+                            <h4 style="color: var(--neon-cyan); margin: 0 0 5px 0; border-bottom: 1px solid rgba(0, 240, 255, 0.2); padding-bottom: 3px; font-size: 12px; font-family: 'Orbitron', sans-serif;">USER PROFILE</h4>
+                            <div id="profile-list" style="display: flex; flex-direction: column; gap: 4px;">
+                                <!-- Dynamically loaded key-value pairs -->
+                            </div>
+                            <div class="profile-actions" style="margin-top: 8px; display: flex; gap: 5px;">
+                                <input type="text" id="profile-key" placeholder="Key" style="width: 30%; background: rgba(0,0,0,0.5); border: 1px solid rgba(0,240,255,0.3); color: #fff; padding: 2px 4px; font-size: 11px;">
+                                <input type="text" id="profile-val" placeholder="Value" style="width: 50%; background: rgba(0,0,0,0.5); border: 1px solid rgba(0,240,255,0.3); color: #fff; padding: 2px 4px; font-size: 11px;">
+                                <button id="btn-save-profile" style="background: rgba(0,240,255,0.2); border: 1px solid var(--neon-cyan); color: var(--neon-cyan); padding: 2px 8px; font-size: 11px; cursor: pointer; font-family: 'Orbitron', sans-serif;">SAVE</button>
+                            </div>
+                        </div>
+                        
+                        <!-- Facts section -->
+                        <div class="memory-section">
+                            <h4 style="color: var(--neon-purple); margin: 0 0 5px 0; border-bottom: 1px solid rgba(188, 19, 254, 0.2); padding-bottom: 3px; font-size: 12px; font-family: 'Orbitron', sans-serif;">RECALLED FACTS</h4>
+                            <div id="facts-list" style="display: flex; flex-direction: column; gap: 6px; max-height: 150px; overflow-y: auto; padding-right: 5px;">
+                                <!-- Dynamically loaded ChromaDB facts -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Console Stream Panel -->
                 <div class="hud-panel glass-panel flex-grow" id="panel-console">
                     <div class="panel-header">

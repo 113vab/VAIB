@@ -15,6 +15,13 @@ document.addEventListener("DOMContentLoaded", () => {
     const consoleStream = document.getElementById("console-stream");
     const ttsAudio = document.getElementById("tts-audio");
 
+    // Memory Panel Elements
+    const profileList = document.getElementById("profile-list");
+    const profileKeyInput = document.getElementById("profile-key");
+    const profileValInput = document.getElementById("profile-val");
+    const btnSaveProfile = document.getElementById("btn-save-profile");
+    const factsList = document.getElementById("facts-list");
+
     // Diagnostics Elements
     const diagBrain = document.getElementById("diag-brain");
     const diagStt = document.getElementById("diag-stt");
@@ -42,6 +49,10 @@ document.addEventListener("DOMContentLoaded", () => {
     fetchDiagnostics();
     initWebSpeechRecognition();
     fetchPendingPermissions();
+    fetchProfile();
+    fetchFacts();
+
+    btnSaveProfile.addEventListener("click", saveProfileDetail);
     
     // Poll for pending permissions every 3 seconds
     setInterval(fetchPendingPermissions, 3000);
@@ -302,6 +313,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
             // Trigger TTS speech
             await playTTS(assistantResponse);
+
+            // Reload cognitive memory panels dynamically
+            await fetchProfile();
+            await fetchFacts();
         } catch (err) {
             loggerError("Brain processing failed", err);
             appendChatBubble("assistant", "I had trouble computing that request, Sir. Please check my connections.");
@@ -506,6 +521,8 @@ document.addEventListener("DOMContentLoaded", () => {
                     chatMessages.innerHTML = "";
                     appendChatBubble("assistant", "My memory cores have been completely wiped, Sir. I am ready to start fresh.");
                     addLog("[MEMORY] Memory cores purged successfully.", "positive");
+                    await fetchProfile();
+                    await fetchFacts();
                 } else {
                     throw new Error("Failed to clear memory database");
                 }
@@ -629,6 +646,135 @@ document.addEventListener("DOMContentLoaded", () => {
             }
         } catch (err) {
             console.error("Failed to poll reminders:", err);
+        }
+    }
+
+    // ----------------------------------------------------
+    // Cognitive Memory Panel Operations
+    // ----------------------------------------------------
+    async function fetchProfile() {
+        try {
+            const res = await fetch("/api/profile");
+            if (!res.ok) throw new Error("Failed to fetch profile");
+            const profile = await res.json();
+            profileList.innerHTML = "";
+            
+            const keys = Object.keys(profile);
+            if (keys.length === 0) {
+                profileList.innerHTML = `<div style="color: var(--text-muted); font-style: italic;">No profile data saved, Sir.</div>`;
+                return;
+            }
+            
+            keys.forEach(key => {
+                const item = document.createElement("div");
+                item.style.display = "flex";
+                item.style.justify = "space-between";
+                item.style.alignItems = "center";
+                item.style.background = "rgba(255, 255, 255, 0.02)";
+                item.style.padding = "2px 6px";
+                item.style.borderRadius = "2px";
+                item.style.marginBottom = "4px";
+                item.innerHTML = `
+                    <span><strong style="color: var(--neon-cyan); font-family: 'Share Tech Mono', monospace;">${key}</strong>: ${profile[key]}</span>
+                    <span class="delete-profile-item" style="color: var(--neon-purple); cursor: pointer; font-size: 16px; font-weight: bold; padding: 0 4px;" title="Delete Key">&times;</span>
+                `;
+                const delBtn = item.querySelector(".delete-profile-item");
+                delBtn.addEventListener("click", () => deleteProfileKey(key));
+                profileList.appendChild(item);
+            });
+        } catch (err) {
+            console.error("Failed to load profile details:", err);
+        }
+    }
+
+    async function saveProfileDetail() {
+        const key = profileKeyInput.value.trim();
+        const val = profileValInput.value.trim();
+        if (!key || !val) {
+            alert("Sir, please enter both a Key and Value.");
+            return;
+        }
+        try {
+            const res = await fetch("/api/profile", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ key, value: val })
+            });
+            if (res.ok) {
+                addLog(`[MEMORY] Saved profile key '${key}' = '${val}'`, "positive");
+                profileKeyInput.value = "";
+                profileValInput.value = "";
+                await fetchProfile();
+            } else {
+                throw new Error("Save profile failed");
+            }
+        } catch (err) {
+            console.error("Save profile error:", err);
+            addLog("[ERROR] Failed to save profile detail.", "error");
+        }
+    }
+
+    async function deleteProfileKey(key) {
+        if (!confirm(`Remove profile preference '${key}', Sir?`)) return;
+        try {
+            const res = await fetch(`/api/profile/${key}`, { method: "DELETE" });
+            if (res.ok) {
+                addLog(`[MEMORY] Deleted profile key '${key}'`, "system");
+                await fetchProfile();
+            } else {
+                throw new Error("Delete profile key failed");
+            }
+        } catch (err) {
+            console.error("Delete profile key error:", err);
+        }
+    }
+
+    async function fetchFacts() {
+        try {
+            const res = await fetch("/api/memory/facts");
+            if (!res.ok) throw new Error("Failed to fetch facts");
+            const facts = await res.json();
+            factsList.innerHTML = "";
+            
+            if (facts.length === 0) {
+                factsList.innerHTML = `<div style="color: var(--text-muted); font-style: italic;">No semantic facts stored, Sir.</div>`;
+                return;
+            }
+            
+            facts.forEach(item => {
+                const el = document.createElement("div");
+                el.style.display = "flex";
+                el.style.justify = "space-between";
+                el.style.alignItems = "flex-start";
+                el.style.gap = "8px";
+                el.style.borderBottom = "1px solid rgba(255, 255, 255, 0.04)";
+                el.style.padding = "4px 0";
+                el.style.marginBottom = "4px";
+                el.innerHTML = `
+                    <span style="flex-grow: 1; word-break: break-all; font-family: 'Share Tech Mono', monospace; font-size: 11px;">${item.fact}</span>
+                    <button class="delete-fact-btn" style="background: none; border: none; color: var(--text-negative); cursor: pointer; font-size: 16px; font-weight: bold; padding: 0 4px; line-height: 1;" title="Forget Fact">&times;</button>
+                `;
+                const delBtn = el.querySelector(".delete-fact-btn");
+                delBtn.addEventListener("click", () => deleteFact(item.id));
+                factsList.appendChild(el);
+            });
+        } catch (err) {
+            console.error("Failed to load memory facts:", err);
+        }
+    }
+
+    async function deleteFact(factId) {
+        if (!confirm("Are you sure you want me to forget this fact, Sir?")) return;
+        try {
+            const res = await fetch(`/api/memory/facts/${factId}`, { method: "DELETE" });
+            if (res.ok) {
+                addLog(`[MEMORY] Forgot semantic fact ${factId}`, "system");
+                await fetchFacts();
+            } else {
+                throw new Error("Forget fact failed");
+            }
+        } catch (err) {
+            console.error("Forget fact error:", err);
         }
     }
 

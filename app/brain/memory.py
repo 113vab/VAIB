@@ -39,7 +39,7 @@ class MemoryManager:
         self._init_chroma()
 
     def _init_sqlite(self):
-        """Initialize SQLite database for chat history."""
+        """Initialize SQLite database for chat history, user profile, and summaries."""
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
@@ -51,9 +51,22 @@ class MemoryManager:
                     content TEXT
                 )
             """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS user_profile (
+                    key TEXT PRIMARY KEY,
+                    value TEXT
+                )
+            """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS conversation_summaries (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp REAL,
+                    summary TEXT
+                )
+            """)
             conn.commit()
             conn.close()
-            logger.info("SQLite chat history database initialized.")
+            logger.info("SQLite chat history, profile, and summaries databases initialized.")
         except Exception as e:
             logger.error(f"Failed to initialize SQLite database: {e}")
 
@@ -178,3 +191,120 @@ class MemoryManager:
             logger.info("Long-term memories cleared.")
         except Exception as e:
             logger.error(f"Failed to clear long-term memories: {e}")
+
+    # SQLite User Profile Operations
+    def get_profile_value(self, key: str) -> Optional[str]:
+        """Retrieve user profile preference value by key."""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute("SELECT value FROM user_profile WHERE key = ?", (key,))
+            row = cursor.fetchone()
+            conn.close()
+            return row[0] if row else None
+        except Exception as e:
+            logger.error(f"Failed to get profile key {key}: {e}")
+            return None
+
+    def set_profile_value(self, key: str, value: str):
+        """Set or update a user profile preference value."""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT OR REPLACE INTO user_profile (key, value) VALUES (?, ?)",
+                (key, value)
+            )
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            logger.error(f"Failed to set profile key {key}: {e}")
+
+    def get_all_profile(self) -> Dict[str, str]:
+        """Retrieve all user profile preferences as key-value pairs."""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute("SELECT key, value FROM user_profile")
+            rows = cursor.fetchall()
+            conn.close()
+            return {row[0]: row[1] for row in rows}
+        except Exception as e:
+            logger.error(f"Failed to get all profile values: {e}")
+            return {}
+
+    def delete_profile_value(self, key: str) -> bool:
+        """Delete a profile preference key from SQLite."""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM user_profile WHERE key = ?", (key,))
+            conn.commit()
+            conn.close()
+            logger.info(f"Deleted profile key '{key}' from SQLite.")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to delete profile key {key}: {e}")
+            return False
+
+    # SQLite Conversation Summary Operations
+    def get_latest_summary(self) -> Optional[str]:
+        """Retrieve the most recent conversation summary from SQLite."""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute("SELECT summary FROM conversation_summaries ORDER BY id DESC LIMIT 1")
+            row = cursor.fetchone()
+            conn.close()
+            return row[0] if row else None
+        except Exception as e:
+            logger.error(f"Failed to get latest summary: {e}")
+            return None
+
+    def add_summary(self, summary: str):
+        """Save a new conversation summary to SQLite."""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO conversation_summaries (timestamp, summary) VALUES (?, ?)",
+                (time.time(), summary)
+            )
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            logger.error(f"Failed to add summary: {e}")
+
+    # ChromaDB Facts Management Operations
+    def get_all_facts(self) -> List[Dict[str, Any]]:
+        """Retrieve all long-term facts stored in ChromaDB (documents, ids, metadatas)."""
+        if not self.facts_collection:
+            return []
+        try:
+            results = self.facts_collection.get()
+            facts = []
+            ids = results.get("ids", [])
+            documents = results.get("documents", [])
+            metadatas = results.get("metadatas", [])
+            for i in range(len(ids)):
+                facts.append({
+                    "id": ids[i],
+                    "fact": documents[i],
+                    "metadata": metadatas[i] if metadatas else {}
+                })
+            return facts
+        except Exception as e:
+            logger.error(f"Failed to get all facts from ChromaDB: {e}")
+            return []
+
+    def delete_fact_by_id(self, fact_id: str) -> bool:
+        """Delete a long-term fact by its unique ID in ChromaDB."""
+        if not self.facts_collection:
+            return False
+        try:
+            self.facts_collection.delete(ids=[fact_id])
+            logger.info(f"Deleted fact with ID {fact_id} from ChromaDB.")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to delete fact {fact_id} from ChromaDB: {e}")
+            return False

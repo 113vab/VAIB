@@ -6,6 +6,8 @@ import google.generativeai as genai
 from google.generativeai.types import ContentDict, PartDict
 from app.config import logger, GEMINI_API_KEY
 from app.brain.memory import MemoryManager
+from app.brain.context import ContextManager
+from app.brain.summarizer import ConversationSummarizer
 from app.tools import (
     PermissionsManager,
     open_app,
@@ -62,11 +64,16 @@ class VaibAgent:
         self.api_key = GEMINI_API_KEY
         self.model_name = "gemini-2.5-flash"
         
+        self.context_manager = ContextManager(self.memory)
+        self.summarizer = ConversationSummarizer(self.memory)
+        
         # Define tools for the model
         self.tools_list = [
             self.save_user_preference,
             self.clear_all_memory,
             self.get_system_status,
+            self.get_profile_preference,
+            self.set_profile_preference,
             open_app,
             close_app,
             check_app_running,
@@ -159,6 +166,29 @@ class VaibAgent:
         )
         return status
 
+    def get_profile_preference(self, key: str) -> str:
+        """
+        Retrieve a specific user profile preference or personal detail (e.g., 'name', 'language', 'theme').
+        
+        Args:
+            key: The key of the preference or profile detail to retrieve.
+        """
+        val = self.memory.get_profile_value(key)
+        if val is not None:
+            return f"Profile detail for '{key}': {val}"
+        return f"No profile detail found for key: '{key}'"
+
+    def set_profile_preference(self, key: str, value: str) -> str:
+        """
+        Store or update a specific user profile preference or personal fact (e.g., set 'name' to 'Visha').
+        
+        Args:
+            key: The key of the preference or profile detail to set.
+            value: The value to save.
+        """
+        self.memory.set_profile_value(key, value)
+        return f"Successfully updated profile, Sir: '{key}' is now set to '{value}'"
+
     async def execute_tool(self, name: str, args: Dict[str, Any]) -> Union[str, Dict[str, Any]]:
         """Match and execute tool by name."""
         logger.info(f"Executing tool '{name}' with args {args}")
@@ -169,6 +199,10 @@ class VaibAgent:
                 return self.clear_all_memory()
             elif name == "get_system_status":
                 return self.get_system_status()
+            elif name == "get_profile_preference":
+                return self.get_profile_preference(**args)
+            elif name == "set_profile_preference":
+                return self.set_profile_preference(**args)
             elif name == "open_app":
                 return open_app(**args)
             elif name == "close_app":
@@ -468,6 +502,7 @@ class VaibAgent:
 
         self.memory.add_chat_message("user", user_input)
         self.memory.add_chat_message("assistant", final_text)
+        self.summarizer.auto_summarize_if_needed(None)
         return final_text
 
     async def generate_response(self, user_input: str) -> str:
@@ -478,11 +513,8 @@ class VaibAgent:
             return await self._generate_response_simulation(user_input)
 
         try:
-            # 1. Retrieve semantic context (long term memories)
-            facts = self.memory.query_facts(user_input, limit=3)
-            facts_context = ""
-            if facts:
-                facts_context = "Relevant facts from long-term memory:\n" + "\n".join([f"- {f}" for f in facts]) + "\n\n"
+            # 1. Build cognitive system context (Profile, Summary, semantic Facts)
+            system_context = self.context_manager.build_system_context(user_input)
             
             # 2. Retrieve recent chat history
             history = self.memory.get_chat_history(limit=10)
@@ -490,15 +522,15 @@ class VaibAgent:
             # 3. Build contents for Gemini
             contents = []
             
-            # Add context message as first turn if we have facts
-            if facts_context:
+            # Add context message as first turn if we have system_context
+            if system_context:
                 contents.append({
                     "role": "user",
-                    "parts": [{"text": f"[System Context (DO NOT REPEAT VERBATIM unless relevant)]: {facts_context} Please keep this in mind during the conversation."}]
+                    "parts": [{"text": f"[System Context (DO NOT REPEAT VERBATIM unless relevant)]:\n{system_context}\nPlease keep this in mind during the conversation."}]
                 })
                 contents.append({
                     "role": "model",
-                    "parts": [{"text": "Acknowledged. I have recalled those details, Sir."}]
+                    "parts": [{"text": "Acknowledged, Sir. I have loaded the profile preferences, conversation summaries, and recalled long-term details."}]
                 })
             
             # Add chat history
@@ -580,6 +612,9 @@ class VaibAgent:
             # Save this turn to SQLite history
             self.memory.add_chat_message("user", user_input)
             self.memory.add_chat_message("assistant", final_text)
+            
+            # Trigger automatic summarization checklist asynchronously/background
+            self.summarizer.auto_summarize_if_needed(self.model)
             
             return final_text
             

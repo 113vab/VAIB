@@ -53,6 +53,10 @@ class ClientLogRequest(BaseModel):
     level: str
     message: str
 
+class ProfileRequest(BaseModel):
+    key: str
+    value: str
+
 # Mount static folders
 # Ensure directories exist
 GUI_DIR = Path(__file__).resolve().parent / "gui"
@@ -169,6 +173,58 @@ async def clear_memory_endpoint():
         return {"status": "success", "message": "Memory cleared."}
     except Exception as e:
         logger.error(f"Error clearing memory: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/profile")
+async def get_profile_endpoint():
+    """Retrieve all profile details."""
+    try:
+        return memory.get_all_profile()
+    except Exception as e:
+        logger.error(f"Error fetching profile: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/profile")
+async def set_profile_endpoint(request: ProfileRequest):
+    """Set or update a profile value."""
+    try:
+        memory.set_profile_value(request.key, request.value)
+        return {"status": "success", "message": f"Updated profile key '{request.key}'."}
+    except Exception as e:
+        logger.error(f"Error setting profile value: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/profile/{key}")
+async def delete_profile_endpoint(key: str):
+    """Delete a profile key."""
+    try:
+        success = memory.delete_profile_value(key)
+        if success:
+            return {"status": "success", "message": f"Profile key '{key}' deleted."}
+        raise HTTPException(status_code=400, detail="Failed to delete key.")
+    except Exception as e:
+        logger.error(f"Error deleting profile key: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/memory/facts")
+async def get_facts_endpoint():
+    """Retrieve all long-term facts stored in ChromaDB."""
+    try:
+        return memory.get_all_facts()
+    except Exception as e:
+        logger.error(f"Error fetching long-term memories: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/memory/facts/{fact_id}")
+async def delete_fact_endpoint(fact_id: str):
+    """Delete a specific long-term fact from ChromaDB."""
+    try:
+        success = memory.delete_fact_by_id(fact_id)
+        if success:
+            return {"status": "success", "message": f"Fact '{fact_id}' deleted."}
+        raise HTTPException(status_code=400, detail="Failed to delete fact.")
+    except Exception as e:
+        logger.error(f"Error deleting fact: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # Permission endpoints
