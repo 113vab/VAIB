@@ -1,4 +1,5 @@
 import sqlite3
+import json
 import chromadb
 from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
 import google.generativeai as genai
@@ -62,6 +63,32 @@ class MemoryManager:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     timestamp REAL,
                     summary TEXT
+                )
+            """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS agent_goals (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    goal TEXT,
+                    status TEXT,
+                    created_at REAL,
+                    updated_at REAL,
+                    result TEXT
+                )
+            """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS agent_tasks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    goal_id INTEGER,
+                    step_number INTEGER,
+                    description TEXT,
+                    tool_name TEXT,
+                    tool_args TEXT,
+                    status TEXT,
+                    observation TEXT,
+                    reflection TEXT,
+                    started_at REAL,
+                    completed_at REAL,
+                    FOREIGN KEY(goal_id) REFERENCES agent_goals(id) ON DELETE CASCADE
                 )
             """)
             conn.commit()
@@ -410,4 +437,187 @@ class MemoryManager:
             return True
         except Exception as e:
             logger.error(f"Failed to delete document '{source_name}': {e}")
+            return False
+
+    # Autonomous Goal and Task Queue Operations
+    def add_agent_goal(self, goal: str) -> int:
+        """Create a new agent goal record in SQLite. Returns the auto-incremented goal ID."""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            now = time.time()
+            cursor.execute(
+                "INSERT INTO agent_goals (goal, status, created_at, updated_at, result) VALUES (?, ?, ?, ?, ?)",
+                (goal, "pending", now, now, "")
+            )
+            goal_id = cursor.lastrowid
+            conn.commit()
+            conn.close()
+            return goal_id
+        except Exception as e:
+            logger.error(f"Failed to add agent goal: {e}")
+            return -1
+
+    def update_agent_goal_status(self, goal_id: int, status: str, result: str = ""):
+        """Update the status, updated_at time, and optionally the final result of a goal."""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE agent_goals SET status = ?, updated_at = ?, result = ? WHERE id = ?",
+                (status, time.time(), result or "", goal_id)
+            )
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            logger.error(f"Failed to update agent goal status: {e}")
+
+    def get_agent_goals(self) -> List[Dict[str, Any]]:
+        """Retrieve all goals from SQLite."""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, goal, status, created_at, updated_at, result FROM agent_goals ORDER BY id DESC")
+            rows = cursor.fetchall()
+            conn.close()
+            return [
+                {
+                    "id": row[0],
+                    "goal": row[1],
+                    "status": row[2],
+                    "created_at": row[3],
+                    "updated_at": row[4],
+                    "result": row[5]
+                }
+                for row in rows
+            ]
+        except Exception as e:
+            logger.error(f"Failed to fetch agent goals: {e}")
+            return []
+
+    def get_agent_goal(self, goal_id: int) -> Optional[Dict[str, Any]]:
+        """Retrieve a specific goal by ID."""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, goal, status, created_at, updated_at, result FROM agent_goals WHERE id = ?", (goal_id,))
+            row = cursor.fetchone()
+            conn.close()
+            if row:
+                return {
+                    "id": row[0],
+                    "goal": row[1],
+                    "status": row[2],
+                    "created_at": row[3],
+                    "updated_at": row[4],
+                    "result": row[5]
+                }
+            return None
+        except Exception as e:
+            logger.error(f"Failed to fetch agent goal: {e}")
+            return None
+
+    def add_agent_task(self, goal_id: int, step_number: int, description: str, tool_name: str, tool_args: Dict[str, Any]) -> int:
+        """Add a subtask step for a goal."""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO agent_tasks (goal_id, step_number, description, tool_name, tool_args, status, observation, reflection, started_at, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (goal_id, step_number, description, tool_name, json.dumps(tool_args), "pending", "", "", 0.0, 0.0)
+            )
+            task_id = cursor.lastrowid
+            conn.commit()
+            conn.close()
+            return task_id
+        except Exception as e:
+            logger.error(f"Failed to add agent task: {e}")
+            return -1
+
+    def update_agent_task(self, task_id: int, status: str, observation: str = None, reflection: str = None, started_at: float = None, completed_at: float = None):
+        """Update fields of a subtask step."""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # Construct dynamic updates
+            updates = []
+            params = []
+            
+            updates.append("status = ?")
+            params.append(status)
+            
+            if observation is not None:
+                updates.append("observation = ?")
+                params.append(observation)
+                
+            if reflection is not None:
+                updates.append("reflection = ?")
+                params.append(reflection)
+                
+            if started_at is not None:
+                updates.append("started_at = ?")
+                params.append(started_at)
+                
+            if completed_at is not None:
+                updates.append("completed_at = ?")
+                params.append(completed_at)
+                
+            params.append(task_id)
+            query = f"UPDATE agent_tasks SET {', '.join(updates)} WHERE id = ?"
+            cursor.execute(query, tuple(params))
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            logger.error(f"Failed to update agent task: {e}")
+
+    def get_agent_tasks(self, goal_id: int) -> List[Dict[str, Any]]:
+        """Retrieve all subtask steps for a given goal sorted by step_number."""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT id, goal_id, step_number, description, tool_name, tool_args, status, observation, reflection, started_at, completed_at FROM agent_tasks WHERE goal_id = ? ORDER BY step_number ASC",
+                (goal_id,)
+            )
+            rows = cursor.fetchall()
+            conn.close()
+            
+            tasks = []
+            for row in rows:
+                try:
+                    args = json.loads(row[5])
+                except Exception:
+                    args = {}
+                tasks.append({
+                    "id": row[0],
+                    "goal_id": row[1],
+                    "step_number": row[2],
+                    "description": row[3],
+                    "tool_name": row[4],
+                    "tool_args": args,
+                    "status": row[6],
+                    "observation": row[7],
+                    "reflection": row[8],
+                    "started_at": row[9],
+                    "completed_at": row[10]
+                })
+            return tasks
+        except Exception as e:
+            logger.error(f"Failed to fetch agent tasks: {e}")
+            return []
+
+    def delete_agent_goal(self, goal_id: int) -> bool:
+        """Delete a goal and its associated tasks from the database."""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM agent_goals WHERE id = ?", (goal_id,))
+            cursor.execute("DELETE FROM agent_tasks WHERE goal_id = ?", (goal_id,))
+            conn.commit()
+            conn.close()
+            logger.info(f"Deleted agent goal ID {goal_id} and all related tasks.")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to delete agent goal: {e}")
             return False

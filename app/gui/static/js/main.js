@@ -41,6 +41,11 @@ document.addEventListener("DOMContentLoaded", () => {
     const panelPermissions = document.getElementById("panel-permissions");
     const pendingPermissionsList = document.getElementById("pending-permissions-list");
 
+    // Agent Autonomous Panel Elements
+    const agentGoalInput = document.getElementById("agent-goal-input");
+    const btnSubmitGoal = document.getElementById("btn-submit-goal");
+    const agentGoalsList = document.getElementById("agent-goals-list");
+
     // Recording State Variables
     let mediaRecorder = null;
     let audioChunks = [];
@@ -62,11 +67,29 @@ document.addEventListener("DOMContentLoaded", () => {
     btnSaveProfile.addEventListener("click", saveProfileDetail);
     ragFileInput.addEventListener("change", handleRAGUpload);
     
+    if (btnSubmitGoal) {
+        btnSubmitGoal.addEventListener("click", submitAgentGoal);
+    }
+    if (agentGoalInput) {
+        agentGoalInput.addEventListener("keydown", (e) => {
+            if (e.key === "Enter") {
+                e.preventDefault();
+                submitAgentGoal();
+            }
+        });
+    }
+
+    // Load initial goals list
+    fetchAgentGoals();
+    
     // Poll for pending permissions every 3 seconds
     setInterval(fetchPendingPermissions, 3000);
     
     // Poll for active reminders every 3 seconds
     setInterval(fetchReminders, 3000);
+
+    // Poll for agent goals every 2 seconds
+    setInterval(fetchAgentGoals, 2000);
 
     // ----------------------------------------------------
     // Clock HUD Display
@@ -889,6 +912,163 @@ document.addEventListener("DOMContentLoaded", () => {
         } catch (err) {
             console.error("Delete RAG document failed:", err);
             addLog(`[ERROR] Failed to delete document: ${err.message}`, "error");
+        }
+    }
+
+    // ----------------------------------------------------
+    // Agent Goal Execution Operations
+    // ----------------------------------------------------
+    async function fetchAgentGoals() {
+        if (!agentGoalsList) return;
+        try {
+            const res = await fetch("/api/agent/goals");
+            if (!res.ok) throw new Error("Failed to fetch agent goals");
+            const goals = await res.json();
+            agentGoalsList.innerHTML = "";
+            
+            if (goals.length === 0) {
+                agentGoalsList.innerHTML = `<div style="color: var(--text-muted); font-style: italic; font-size: 11px;">No active goals, Sir.</div>`;
+                return;
+            }
+            
+            for (const goal of goals) {
+                const el = document.createElement("div");
+                el.style.border = "1px solid rgba(255, 255, 255, 0.05)";
+                el.style.background = "rgba(0, 0, 0, 0.2)";
+                el.style.padding = "6px 8px";
+                el.style.borderRadius = "3px";
+                el.style.marginBottom = "6px";
+                
+                let statusColor = "var(--text-muted)";
+                if (goal.status === "running") statusColor = "var(--neon-cyan)";
+                else if (goal.status === "paused") statusColor = "yellow";
+                else if (goal.status === "completed") statusColor = "var(--text-positive)";
+                else if (goal.status === "failed") statusColor = "var(--text-negative)";
+                else if (goal.status === "cancelled") statusColor = "var(--neon-purple)";
+                
+                const tasksRes = await fetch(`/api/agent/goals/${goal.id}`);
+                let tasksHtml = "";
+                if (tasksRes.ok) {
+                    const detail = await tasksRes.json();
+                    if (detail.tasks && detail.tasks.length > 0) {
+                        tasksHtml = `<div style="margin-top: 5px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 4px; display: flex; flex-direction: column; gap: 2px;">`;
+                        detail.tasks.forEach(task => {
+                            let taskStatusColor = "var(--text-muted)";
+                            if (task.status === "running") taskStatusColor = "var(--neon-cyan)";
+                            else if (task.status === "completed") taskStatusColor = "var(--text-positive)";
+                            else if (task.status === "failed") taskStatusColor = "var(--text-negative)";
+                            else if (task.status === "paused_on_permission") taskStatusColor = "yellow";
+                            
+                            tasksHtml += `
+                                <div style="font-size: 10px; display: flex; justify-content: space-between; font-family: 'Share Tech Mono', monospace;">
+                                    <span style="color: ${taskStatusColor};">Step ${task.step_number}: ${task.description}</span>
+                                    <span style="color: ${taskStatusColor}; text-transform: uppercase;">[${task.status}]</span>
+                                </div>
+                            `;
+                        });
+                        tasksHtml += `</div>`;
+                    }
+                }
+
+                let actionsHtml = "";
+                if (goal.status === "running" || goal.status === "paused") {
+                    actionsHtml = `<button class="goal-action-btn cancel-btn" data-id="${goal.id}" style="background: rgba(255, 0, 80, 0.2); border: 1px solid var(--neon-purple); color: var(--neon-purple); font-size: 9px; padding: 2px 5px; cursor: pointer; border-radius: 2px; font-family: 'Orbitron', sans-serif;">CANCEL</button>`;
+                } else if (goal.status === "failed" || goal.status === "cancelled" || goal.status === "completed") {
+                    actionsHtml = `
+                        <button class="goal-action-btn resume-btn" data-id="${goal.id}" style="background: rgba(0, 240, 255, 0.1); border: 1px solid var(--neon-cyan); color: var(--neon-cyan); font-size: 9px; padding: 2px 5px; cursor: pointer; border-radius: 2px; font-family: 'Orbitron', sans-serif;">RE-RUN</button>
+                        <button class="goal-action-btn delete-goal-btn" data-id="${goal.id}" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.2); color: var(--text-color); font-size: 9px; padding: 2px 5px; cursor: pointer; border-radius: 2px; font-family: 'Orbitron', sans-serif; margin-left: 4px;">REMOVE</button>
+                    `;
+                }
+
+                el.innerHTML = `
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 5px;">
+                        <div style="display: flex; flex-direction: column; max-width: 70%;">
+                            <span style="font-weight: bold; color: var(--text-color); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${goal.goal}">${goal.goal}</span>
+                            <span style="font-size: 10px; color: ${statusColor}; text-transform: uppercase; font-family: 'Orbitron', sans-serif;">Status: ${goal.status} ${goal.result ? ' - ' + goal.result : ''}</span>
+                        </div>
+                        <div style="display: flex; gap: 3px;">
+                            ${actionsHtml}
+                        </div>
+                    </div>
+                    ${tasksHtml}
+                `;
+                
+                el.querySelectorAll(".cancel-btn").forEach(btn => {
+                    btn.addEventListener("click", () => cancelAgentGoal(goal.id));
+                });
+                el.querySelectorAll(".resume-btn").forEach(btn => {
+                    btn.addEventListener("click", () => resumeAgentGoal(goal.id));
+                });
+                el.querySelectorAll(".delete-goal-btn").forEach(btn => {
+                    btn.addEventListener("click", () => deleteAgentGoal(goal.id));
+                });
+                
+                agentGoalsList.appendChild(el);
+            }
+        } catch (err) {
+            console.error("fetchAgentGoals error:", err);
+        }
+    }
+
+    async function submitAgentGoal() {
+        const goalText = agentGoalInput.value.trim();
+        if (!goalText) return;
+        
+        addLog(`[AGENT] Dispatching autonomous goal: "${goalText}"`, "system");
+        agentGoalInput.value = "";
+        
+        try {
+            const res = await fetch("/api/agent/goals", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ goal: goalText })
+            });
+            if (res.ok) {
+                const data = await res.json();
+                addLog(`[AGENT] Goal accepted, execution ID: ${data.id}`, "positive");
+                await fetchAgentGoals();
+            } else {
+                throw new Error("Goal submission failed");
+            }
+        } catch (err) {
+            console.error("Goal submit error:", err);
+            addLog(`[ERROR] Goal submission failed: ${err.message}`, "error");
+        }
+    }
+
+    async function cancelAgentGoal(goalId) {
+        try {
+            const res = await fetch(`/api/agent/goals/${goalId}/cancel`, { method: "POST" });
+            if (res.ok) {
+                addLog(`[AGENT] Cancellation requested for Goal ID: ${goalId}`, "system");
+                await fetchAgentGoals();
+            }
+        } catch (err) {
+            console.error("Cancel goal error:", err);
+        }
+    }
+
+    async function resumeAgentGoal(goalId) {
+        try {
+            const res = await fetch(`/api/agent/goals/${goalId}/resume`, { method: "POST" });
+            if (res.ok) {
+                addLog(`[AGENT] Goal ID ${goalId} restarted.`, "system");
+                await fetchAgentGoals();
+            }
+        } catch (err) {
+            console.error("Resume goal error:", err);
+        }
+    }
+
+    async function deleteAgentGoal(goalId) {
+        try {
+            const res = await fetch(`/api/agent/goals/${goalId}`, { method: "DELETE" });
+            if (res.ok) {
+                addLog(`[AGENT] Goal ID ${goalId} removed from log history.`, "system");
+                await fetchAgentGoals();
+            }
+        } catch (err) {
+            console.error("Delete goal error:", err);
         }
     }
 

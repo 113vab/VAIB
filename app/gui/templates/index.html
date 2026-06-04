@@ -213,6 +213,31 @@
 
             <!-- Right Side: Cognitive Chat Interface -->
             <section class="hud-column right-col">
+                <!-- Autonomous Execution Panel -->
+                <div class="hud-panel glass-panel" id="panel-agent" style="margin-bottom: 15px; max-height: 250px; display: flex; flex-direction: column;">
+                    <div class="panel-header">
+                        <span class="panel-title">AUTONOMOUS EXECUTION</span>
+                        <span class="panel-tag">// AGENT.EXEC</span>
+                    </div>
+                    <div class="panel-body agent-body" style="padding: 10px; overflow-y: auto; flex-grow: 1; font-size: 13px; display: flex; flex-direction: column; gap: 10px;">
+                        <!-- Goal Trigger Section -->
+                        <div class="goal-input-section" style="display: flex; gap: 5px;">
+                            <input type="text" id="agent-goal-input" placeholder="Enter autonomous goal..." style="flex-grow: 1; background: rgba(0, 0, 0, 0.4); border: 1px solid rgba(0, 240, 255, 0.3); color: var(--text-color); font-family: 'Share Tech Mono', monospace; font-size: 12px; padding: 6px; outline: none; border-radius: 2px;">
+                            <button id="btn-submit-goal" style="background: rgba(0, 240, 255, 0.2); border: 1px solid var(--neon-cyan); color: var(--neon-cyan); padding: 5px 10px; font-family: 'Orbitron', sans-serif; font-size: 11px; cursor: pointer; border-radius: 2px;">RUN</button>
+                        </div>
+                        
+                        <!-- Goals List -->
+                        <div class="goals-section" style="flex-grow: 1; display: flex; flex-direction: column; min-height: 100px;">
+                            <h4 style="color: var(--neon-cyan); margin: 0 0 5px 0; border-bottom: 1px solid rgba(0, 240, 255, 0.2); padding-bottom: 3px; font-size: 11px; font-family: 'Orbitron', sans-serif;">
+                                ACTIVE AGENT TASKS
+                            </h4>
+                            <div id="agent-goals-list" style="display: flex; flex-direction: column; gap: 6px; overflow-y: auto; flex-grow: 1; max-height: 140px; padding-right: 5px;">
+                                <!-- Dynamically loaded goals -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="hud-panel glass-panel chat-panel flex-grow" id="panel-chat">
                     <div class="panel-header">
                         <span class="panel-title">COMMUNICATION MATRIX</span>

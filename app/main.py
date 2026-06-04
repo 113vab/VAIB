@@ -16,6 +16,7 @@ from app.voice.tts import TTSManager
 from app.voice.stt import STTManager
 from app.tools import PermissionsManager
 from app.brain.rag import DocumentIngestionPipeline
+from app.brain.planner import AgentExecutorManager
 
 # Initialize components
 logger.info("Initializing V.A.I.B. core systems...")
@@ -24,6 +25,7 @@ agent = VaibAgent(memory)
 tts = TTSManager()
 stt = STTManager()
 rag_pipeline = DocumentIngestionPipeline(memory)
+agent_executor = AgentExecutorManager(agent, memory)
 
 app = FastAPI(
     title="V.A.I.B. Personal AI Assistant",
@@ -375,6 +377,60 @@ async def poll_notifications():
     except Exception as e:
         logger.error(f"Error polling notifications: {e}")
         return {"notifications": []}
+
+class GoalRequest(BaseModel):
+    goal: str
+
+@app.post("/api/agent/goals")
+async def create_agent_goal(req: GoalRequest):
+    goal_id = memory.add_agent_goal(req.goal)
+    if goal_id == -1:
+        raise HTTPException(status_code=500, detail="Failed to create agent goal.")
+    
+    started = agent_executor.start_goal_execution(goal_id)
+    if not started:
+        raise HTTPException(status_code=500, detail="Failed to initiate goal background execution.")
+        
+    return {"id": goal_id, "status": "pending"}
+
+@app.get("/api/agent/goals")
+async def get_agent_goals():
+    return memory.get_agent_goals()
+
+@app.get("/api/agent/goals/{goal_id}")
+async def get_agent_goal_detail(goal_id: int):
+    goal = memory.get_agent_goal(goal_id)
+    if not goal:
+        raise HTTPException(status_code=404, detail="Goal not found.")
+    tasks = memory.get_agent_tasks(goal_id)
+    return {"goal": goal, "tasks": tasks}
+
+@app.post("/api/agent/goals/{goal_id}/cancel")
+async def cancel_agent_goal(goal_id: int):
+    goal = memory.get_agent_goal(goal_id)
+    if not goal:
+        raise HTTPException(status_code=404, detail="Goal not found.")
+    agent_executor.cancel_goal_execution(goal_id)
+    return {"status": "success", "message": "Goal cancellation requested."}
+
+@app.post("/api/agent/goals/{goal_id}/resume")
+async def resume_agent_goal(goal_id: int):
+    goal = memory.get_agent_goal(goal_id)
+    if not goal:
+        raise HTTPException(status_code=404, detail="Goal not found.")
+    
+    memory.update_agent_goal_status(goal_id, "pending", "")
+    started = agent_executor.start_goal_execution(goal_id)
+    if not started:
+        raise HTTPException(status_code=500, detail="Failed to resume goal execution.")
+    return {"status": "success", "message": "Goal execution resumed."}
+
+@app.delete("/api/agent/goals/{goal_id}")
+async def delete_agent_goal(goal_id: int):
+    success = memory.delete_agent_goal(goal_id)
+    if not success:
+         raise HTTPException(status_code=500, detail="Failed to delete agent goal.")
+    return {"status": "success", "message": "Goal deleted successfully."}
 
 # Also mount static assets under /static for stylesheet, scripts, etc.
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
