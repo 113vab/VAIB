@@ -18,7 +18,7 @@ class GeminiEmbeddingFunction(EmbeddingFunction):
     def __call__(self, input: Documents) -> Embeddings:
         if not self.api_key:
             logger.warning("No Gemini API key provided. Using dummy embeddings.")
-            return [[0.0] * 768 for _ in input]
+            return [[0.0] * 3072 for _ in input]
         try:
             # gemini-embedding-001 returns 768-dimensional embeddings
             result = genai.embed_content(
@@ -30,7 +30,7 @@ class GeminiEmbeddingFunction(EmbeddingFunction):
         except Exception as e:
             logger.error(f"Error generating embeddings with Gemini: {e}")
             # Fallback to zero vectors to prevent hard crashes
-            return [[0.0] * 768 for _ in input]
+            return [[0.0] * 3072 for _ in input]
 
 class MemoryManager:
     """Manages V.A.I.B.'s memory: SQLite for chat logs, ChromaDB for semantic facts."""

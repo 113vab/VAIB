@@ -90,10 +90,21 @@ def test_goal_decomposition_simulation(test_agent_env):
     assert steps[0]["tool_name"] == "browser_search"
     assert steps[1]["tool_name"] == "create_file"
     
-    # Default scenario
-    steps = planner.decompose("custom weird goal")
+    # Create folder scenario
+    steps = planner.decompose("create folder MY_DUMMY_DIR on Desktop")
     assert len(steps) == 1
-    assert steps[0]["tool_name"] == "get_system_status"
+    assert steps[0]["tool_name"] == "create_directory"
+    assert "MY_DUMMY_DIR" in steps[0]["tool_args"]["path"]
+    
+    # Open notepad scenario
+    steps = planner.decompose("open notepad application")
+    assert len(steps) == 1
+    assert steps[0]["tool_name"] == "open_app"
+    assert steps[0]["tool_args"]["app_name"] == "notepad"
+    
+    # Failed decomposition scenario
+    steps = planner.decompose("custom weird goal")
+    assert len(steps) == 0
 
 def test_executor_loop_execution(test_agent_env):
     """Test the complete Plan-Act-Observe-Reflect loop execution."""
@@ -185,3 +196,21 @@ def test_executor_loop_permission_handling(test_agent_env):
         tasks = memory.get_agent_tasks(goal_id)
         assert tasks[0]["status"] == "completed"
         assert tasks[0]["observation"] == "Clipboard secret contents"
+
+def test_reflection_result_evaluation(test_agent_env):
+    """Test that simulated reflection correctly evaluates tool execution outcomes."""
+    planner = test_agent_env["planner"]
+    
+    # Success cases
+    res = planner.reflect("goal", {"step_number": 1, "tool_name": "create_directory"}, "Successfully created directory")
+    assert res["success"] is True
+    assert res["action"] == "continue"
+    
+    # Error cases
+    res = planner.reflect("goal", {"step_number": 1, "tool_name": "create_directory"}, "Error: Failed to create directory due to permissions")
+    assert res["success"] is False
+    assert res["action"] == "stop"
+    
+    res = planner.reflect("goal", {"step_number": 1, "tool_name": "open_app"}, "Unknown application calculator, Failed to launch")
+    assert res["success"] is False
+    assert res["action"] == "stop"

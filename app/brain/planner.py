@@ -72,6 +72,8 @@ Each object in the JSON array must follow this schema:
         """Simulate goal decomposition for testing or offline usage."""
         goal_lower = goal.lower()
         steps = []
+        words = goal.split()
+        from pathlib import Path
         
         # Scenario 1: Search and save
         if "search" in goal_lower and ("write" in goal_lower or "save" in goal_lower or "file" in goal_lower):
@@ -120,13 +122,89 @@ Each object in the JSON array must follow this schema:
                 "tool_name": "capture_screenshot",
                 "tool_args": {}
             })
-        # Default fallback
-        else:
+        # Scenario 5: create folder / create directory
+        elif "create folder" in goal_lower or "create directory" in goal_lower:
+            path = "VAIB_TEST"
+            for i, w in enumerate(words):
+                if w.lower() in ["folder", "directory"] and i + 1 < len(words):
+                    path = words[i+1].strip(".,'\"")
+                    break
+            if "desktop" in goal_lower:
+                path = str(Path.home() / "Desktop" / path)
             steps.append({
                 "step_number": 1,
-                "description": "Retrieve system health and configuration status",
-                "tool_name": "get_system_status",
-                "tool_args": {}
+                "description": f"Create directory at {path}",
+                "tool_name": "create_directory",
+                "tool_args": {"path": path}
+            })
+        # Scenario 6: open notepad
+        elif "open notepad" in goal_lower:
+            steps.append({
+                "step_number": 1,
+                "description": "Open Notepad desktop application",
+                "tool_name": "open_app",
+                "tool_args": {"app_name": "notepad"}
+            })
+        # Scenario 7: open calculator
+        elif "open calculator" in goal_lower:
+            steps.append({
+                "step_number": 1,
+                "description": "Open Calculator desktop application",
+                "tool_name": "open_app",
+                "tool_args": {"app_name": "calculator"}
+            })
+        # Scenario 8: open chrome
+        elif "open chrome" in goal_lower:
+            steps.append({
+                "step_number": 1,
+                "description": "Open Chrome web browser",
+                "tool_name": "open_app",
+                "tool_args": {"app_name": "chrome"}
+            })
+        # Scenario 9: open edge
+        elif "open edge" in goal_lower:
+            steps.append({
+                "step_number": 1,
+                "description": "Open Edge web browser",
+                "tool_name": "open_app",
+                "tool_args": {"app_name": "edge"}
+            })
+        # Scenario 10: open vscode
+        elif "open vscode" in goal_lower or "open vs code" in goal_lower or "open vs-code" in goal_lower:
+            steps.append({
+                "step_number": 1,
+                "description": "Open Visual Studio Code editor",
+                "tool_name": "open_app",
+                "tool_args": {"app_name": "vscode"}
+            })
+        # Scenario 11: delete file
+        elif "delete file" in goal_lower or "remove file" in goal_lower:
+            path = "test.txt"
+            for i, w in enumerate(words):
+                if w.lower() in ["file"] and i + 1 < len(words):
+                    path = words[i+1].strip(".,'\"")
+                    break
+            steps.append({
+                "step_number": 1,
+                "description": f"Delete file at {path}",
+                "tool_name": "delete_file",
+                "tool_args": {"path": path}
+            })
+        # Scenario 12: move file
+        elif "move file" in goal_lower or "move " in goal_lower:
+            src = "test.txt"
+            dest = "dest.txt"
+            if " to " in goal_lower:
+                parts = goal_lower.split(" to ")
+                dest = parts[1].strip(".,'\"")
+                src_part = parts[0].replace("move file", "").replace("move", "").strip(".,'\" ")
+                if src_part:
+                    src = src_part
+            steps.append({
+                "step_number": 1,
+                "description": f"Move file from {src} to {dest}",
+                "tool_name": "move_file",
+                "tool_args": {"src_path": src, "dest_path": dest}
             })
             
         return steps
@@ -134,10 +212,14 @@ Each object in the JSON array must follow this schema:
     def reflect(self, goal: str, step: Dict[str, Any], observation: str) -> Dict[str, Any]:
         """Reflect on the step result and decide if we should proceed, modify the plan, or stop."""
         if not self.agent or not self.agent.model:
+            obs_lower = observation.lower()
+            is_success = True
+            if any(x in obs_lower for x in ["error", "failed", "access denied", "not recognized", "not found"]):
+                is_success = False
             return {
-                "success": True,
-                "reflection": f"Successfully completed step {step['step_number']} using {step['tool_name']}.",
-                "action": "continue"
+                "success": is_success,
+                "reflection": f"Successfully completed step {step['step_number']} using {step['tool_name']}." if is_success else f"Step {step['step_number']} failed with result: {observation}",
+                "action": "continue" if is_success else "stop"
             }
             
         prompt = f"""You are the reflection module of an autonomous AI agent.
@@ -215,7 +297,7 @@ class AgentExecutorManager:
             # Phase 1: Decompose
             steps = self.planner.decompose(goal_text)
             if not steps:
-                self.memory.update_agent_goal_status(goal_id, "failed", "No plan could be generated.")
+                self.memory.update_agent_goal_status(goal_id, "failed", "Unable to decompose goal")
                 return
                 
             # Save decomposed steps to the database

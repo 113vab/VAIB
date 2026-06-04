@@ -12,7 +12,8 @@ APP_MAPPINGS = {
     "vs code": {"exec": "code", "proc": "Code.exe", "shell": True},
     "vscode": {"exec": "code", "proc": "Code.exe", "shell": True},
     "file explorer": {"exec": "explorer.exe", "proc": "explorer.exe"},
-    "explorer": {"exec": "explorer.exe", "proc": "explorer.exe"}
+    "explorer": {"exec": "explorer.exe", "proc": "explorer.exe"},
+    "calculator": {"exec": "calc.exe", "proc": "CalculatorApp.exe"}
 }
 
 def open_app(app_name: str) -> str:
