@@ -74,6 +74,7 @@ class VaibAgent:
             self.get_system_status,
             self.get_profile_preference,
             self.set_profile_preference,
+            self.query_local_knowledge,
             open_app,
             close_app,
             check_app_running,
@@ -189,6 +190,28 @@ class VaibAgent:
         self.memory.set_profile_value(key, value)
         return f"Successfully updated profile, Sir: '{key}' is now set to '{value}'"
 
+    def query_local_knowledge(self, query: str) -> str:
+        """
+        Search the local document knowledge base (RAG) for facts, reports, or guides.
+        Use this tool to find information from user-uploaded files (PDFs, DOCX, TXT).
+        
+        Args:
+            query: The search keywords or questions to match document contents semantically.
+        """
+        results = self.memory.query_documents(query, limit=4)
+        if not results:
+            return "No matching details found in the local knowledge base, Sir."
+            
+        lines = ["Matches retrieved from local documents:"]
+        for item in results:
+            meta = item.get("metadata", {})
+            source = meta.get("source", "Unknown Document")
+            chunk_idx = meta.get("chunk_index", 0)
+            total = meta.get("total_chunks", 1)
+            lines.append(f"- [Source: {source} (Chunk {chunk_idx + 1}/{total})]\n\"{item['text']}\"\n")
+            
+        return "\n".join(lines)
+
     async def execute_tool(self, name: str, args: Dict[str, Any]) -> Union[str, Dict[str, Any]]:
         """Match and execute tool by name."""
         logger.info(f"Executing tool '{name}' with args {args}")
@@ -199,6 +222,8 @@ class VaibAgent:
                 return self.clear_all_memory()
             elif name == "get_system_status":
                 return self.get_system_status()
+            elif name == "query_local_knowledge":
+                return self.query_local_knowledge(**args)
             elif name == "get_profile_preference":
                 return self.get_profile_preference(**args)
             elif name == "set_profile_preference":

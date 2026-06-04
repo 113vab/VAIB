@@ -85,11 +85,17 @@ class MemoryManager:
                 name="vaib_facts",
                 embedding_function=self.emb_fn
             )
-            logger.info("ChromaDB initialized with collection 'vaib_facts'.")
+            # Create or get collection for RAG documents
+            self.docs_collection = self.chroma_client.get_or_create_collection(
+                name="vaib_documents",
+                embedding_function=self.emb_fn
+            )
+            logger.info("ChromaDB initialized with collections 'vaib_facts' and 'vaib_documents'.")
         except Exception as e:
             logger.error(f"Failed to initialize ChromaDB: {e}")
             self.chroma_client = None
             self.facts_collection = None
+            self.docs_collection = None
 
     # SQLite Chat History Operations
     def add_chat_message(self, role: str, content: str):
@@ -307,4 +313,101 @@ class MemoryManager:
             return True
         except Exception as e:
             logger.error(f"Failed to delete fact {fact_id} from ChromaDB: {e}")
+            return False
+
+    # Local Knowledge Base (RAG) Operations
+    def save_document_chunks(self, source_name: str, chunks: List[str]) -> bool:
+        """Save a list of raw text chunks to the vaib_documents vector collection."""
+        if not self.docs_collection:
+            logger.error("ChromaDB docs collection not initialized.")
+            return False
+        try:
+            ids = [f"doc_{source_name}_{i}_{int(time.time() * 1000)}" for i, _ in enumerate(chunks)]
+            metadatas = []
+            timestamp = time.time()
+            for i in range(len(chunks)):
+                metadatas.append({
+                    "source": source_name,
+                    "chunk_index": i,
+                    "total_chunks": len(chunks),
+                    "timestamp": timestamp
+                })
+            
+            self.docs_collection.add(
+                documents=chunks,
+                metadatas=metadatas,
+                ids=ids
+            )
+            logger.info(f"Indexed document '{source_name}' with {len(chunks)} chunks.")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to save document chunks: {e}")
+            return False
+
+    def query_documents(self, query_text: str, limit: int = 5) -> List[Dict[str, Any]]:
+        """Query document chunks by semantic relevance and return matches with metadata."""
+        if not self.docs_collection:
+            return []
+        try:
+            results = self.docs_collection.query(
+                query_texts=[query_text],
+                n_results=limit
+            )
+            documents = results.get("documents", [])
+            metadatas = results.get("metadatas", [])
+            ids = results.get("ids", [])
+            
+            output = []
+            if documents and len(documents) > 0:
+                for i in range(len(documents[0])):
+                    output.append({
+                        "id": ids[0][i],
+                        "text": documents[0][i],
+                        "metadata": metadatas[0][i] if metadatas else {}
+                    })
+            return output
+        except Exception as e:
+            logger.error(f"Failed to query document knowledge base: {e}")
+            return []
+
+    def get_indexed_documents(self) -> List[Dict[str, Any]]:
+        """Retrieve a list of all indexed documents (sources) and their chunk counts."""
+        if not self.docs_collection:
+            return []
+        try:
+            results = self.docs_collection.get()
+            metadatas = results.get("metadatas", []) or []
+            
+            # Aggregate by source name
+            docs_map = {}
+            for meta in metadatas:
+                source = meta.get("source", "Unknown Document")
+                timestamp = meta.get("timestamp", 0.0)
+                if source not in docs_map:
+                    docs_map[source] = {
+                        "source": source,
+                        "chunk_count": 0,
+                        "timestamp": timestamp
+                    }
+                docs_map[source]["chunk_count"] += 1
+                # Keep the latest timestamp
+                if timestamp > docs_map[source]["timestamp"]:
+                     docs_map[source]["timestamp"] = timestamp
+            
+            return list(docs_map.values())
+        except Exception as e:
+            logger.error(f"Failed to fetch indexed documents from ChromaDB: {e}")
+            return []
+
+    def delete_document_by_source(self, source_name: str) -> bool:
+        """Delete all document chunks matching the given source name."""
+        if not self.docs_collection:
+            return False
+        try:
+            # Delete by metadata filter
+            self.docs_collection.delete(where={"source": source_name})
+            logger.info(f"Deleted document '{source_name}' chunks from ChromaDB.")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to delete document '{source_name}': {e}")
             return False

@@ -15,6 +15,7 @@ from app.brain.agent import VaibAgent
 from app.voice.tts import TTSManager
 from app.voice.stt import STTManager
 from app.tools import PermissionsManager
+from app.brain.rag import DocumentIngestionPipeline
 
 # Initialize components
 logger.info("Initializing V.A.I.B. core systems...")
@@ -22,6 +23,7 @@ memory = MemoryManager()
 agent = VaibAgent(memory)
 tts = TTSManager()
 stt = STTManager()
+rag_pipeline = DocumentIngestionPipeline(memory)
 
 app = FastAPI(
     title="V.A.I.B. Personal AI Assistant",
@@ -225,6 +227,56 @@ async def delete_fact_endpoint(fact_id: str):
         raise HTTPException(status_code=400, detail="Failed to delete fact.")
     except Exception as e:
         logger.error(f"Error deleting fact: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/rag/upload")
+async def rag_upload_endpoint(file: UploadFile = File(...)):
+    """Upload a TXT, PDF, or DOCX document to ingest into the local RAG knowledge base."""
+    suffix = Path(file.filename).suffix.lower()
+    if suffix not in [".txt", ".pdf", ".docx"]:
+         raise HTTPException(status_code=400, detail=f"Unsupported file format: {suffix}. Only .txt, .pdf, and .docx are supported.")
+         
+    # Save the file temporarily
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
+         try:
+              shutil.copyfileobj(file.file, temp_file)
+              temp_path = Path(temp_file.name)
+         except Exception as e:
+              logger.error(f"Failed to save temp file for ingestion: {e}")
+              raise HTTPException(status_code=500, detail="Failed to save uploaded file.")
+              
+    try:
+         result = await rag_pipeline.ingest_document(temp_path, custom_source_name=file.filename)
+         return {"status": "success", "data": result}
+    except Exception as e:
+         logger.error(f"Ingestion failed: {e}")
+         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+         if temp_path.exists():
+              try:
+                   os.unlink(temp_path)
+              except Exception as e:
+                   logger.error(f"Failed to clean up temp file {temp_path}: {e}")
+
+@app.get("/api/rag/documents")
+async def get_rag_documents_endpoint():
+    """Retrieve list of all indexed documents in the local knowledge base."""
+    try:
+        return memory.get_indexed_documents()
+    except Exception as e:
+        logger.error(f"Error fetching indexed documents: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/rag/documents/{source_name}")
+async def delete_rag_document_endpoint(source_name: str):
+    """Delete a document from the RAG knowledge base by its name."""
+    try:
+        success = memory.delete_document_by_source(source_name)
+        if success:
+            return {"status": "success", "message": f"Document '{source_name}' successfully deleted."}
+        raise HTTPException(status_code=400, detail=f"Failed to delete document '{source_name}'.")
+    except Exception as e:
+        logger.error(f"Error deleting document: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # Permission endpoints

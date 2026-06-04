@@ -112,6 +112,35 @@
                     </div>
                 </div>
 
+                <!-- Knowledge Base Panel (RAG) -->
+                <div class="hud-panel glass-panel" id="panel-rag" style="margin-bottom: 15px; max-height: 250px; display: flex; flex-direction: column;">
+                    <div class="panel-header">
+                        <span class="panel-title">KNOWLEDGE BASE</span>
+                        <span class="panel-tag">// RAG.01</span>
+                    </div>
+                    <div class="panel-body rag-body" style="padding: 10px; overflow-y: auto; flex-grow: 1; font-size: 13px; display: flex; flex-direction: column; gap: 10px;">
+                        <!-- Upload section -->
+                        <div class="upload-section" style="display: flex; flex-direction: column; gap: 5px;">
+                            <label for="rag-file-input" style="background: rgba(0, 240, 255, 0.1); border: 1px dashed var(--neon-cyan); color: var(--neon-cyan); padding: 8px; font-family: 'Orbitron', sans-serif; font-size: 11px; text-align: center; cursor: pointer; display: block; border-radius: 2px;">
+                                INDEX NEW DOCUMENT (PDF/DOCX/TXT)
+                            </label>
+                            <input type="file" id="rag-file-input" style="display: none;" accept=".txt,.pdf,.docx">
+                            <div id="upload-status" style="font-family: 'Share Tech Mono', monospace; font-size: 10px; color: var(--text-muted); text-align: center;">Ready to index, Sir.</div>
+                        </div>
+                        
+                        <!-- Documents list -->
+                        <div class="documents-section" style="flex-grow: 1; display: flex; flex-direction: column; min-height: 80px;">
+                            <h4 style="color: var(--neon-cyan); margin: 0 0 5px 0; border-bottom: 1px solid rgba(0, 240, 255, 0.2); padding-bottom: 3px; font-size: 11px; font-family: 'Orbitron', sans-serif; display: flex; justify-content: space-between;">
+                                <span>INDEXED FILE LIBRARY</span>
+                                <span id="doc-count-badge" style="background: rgba(0, 240, 255, 0.2); padding: 0 4px; border-radius: 3px; font-size: 9px;">0</span>
+                            </h4>
+                            <div id="documents-list" style="display: flex; flex-direction: column; gap: 4px; overflow-y: auto; flex-grow: 1; max-height: 120px; padding-right: 5px;">
+                                <!-- Dynamically loaded RAG documents -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Console Stream Panel -->
                 <div class="hud-panel glass-panel flex-grow" id="panel-console">
                     <div class="panel-header">

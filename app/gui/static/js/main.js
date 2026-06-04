@@ -22,6 +22,12 @@ document.addEventListener("DOMContentLoaded", () => {
     const btnSaveProfile = document.getElementById("btn-save-profile");
     const factsList = document.getElementById("facts-list");
 
+    // RAG Knowledge Base Elements
+    const ragFileInput = document.getElementById("rag-file-input");
+    const uploadStatus = document.getElementById("upload-status");
+    const docCountBadge = document.getElementById("doc-count-badge");
+    const documentsList = document.getElementById("documents-list");
+
     // Diagnostics Elements
     const diagBrain = document.getElementById("diag-brain");
     const diagStt = document.getElementById("diag-stt");
@@ -51,8 +57,10 @@ document.addEventListener("DOMContentLoaded", () => {
     fetchPendingPermissions();
     fetchProfile();
     fetchFacts();
+    fetchRAGDocuments();
 
     btnSaveProfile.addEventListener("click", saveProfileDetail);
+    ragFileInput.addEventListener("change", handleRAGUpload);
     
     // Poll for pending permissions every 3 seconds
     setInterval(fetchPendingPermissions, 3000);
@@ -775,6 +783,112 @@ document.addEventListener("DOMContentLoaded", () => {
             }
         } catch (err) {
             console.error("Forget fact error:", err);
+        }
+    }
+
+    // ----------------------------------------------------
+    // RAG Knowledge Base Operations
+    // ----------------------------------------------------
+    async function fetchRAGDocuments() {
+        try {
+            const res = await fetch("/api/rag/documents");
+            if (!res.ok) throw new Error("Failed to fetch indexed documents");
+            const docs = await res.json();
+            documentsList.innerHTML = "";
+            docCountBadge.textContent = docs.length;
+            
+            if (docs.length === 0) {
+                documentsList.innerHTML = `<div style="color: var(--text-muted); font-style: italic; font-size: 11px;">No documents indexed, Sir.</div>`;
+                return;
+            }
+            
+            docs.forEach(doc => {
+                const el = document.createElement("div");
+                el.style.display = "flex";
+                el.style.justify = "space-between";
+                el.style.alignItems = "center";
+                el.style.background = "rgba(255, 255, 255, 0.02)";
+                el.style.padding = "4px 6px";
+                el.style.borderRadius = "2px";
+                el.style.marginBottom = "4px";
+                
+                // Formulate a short date string
+                const dateStr = new Date(doc.timestamp * 1000).toLocaleDateString(undefined, {
+                     month: "short",
+                     day: "numeric"
+                });
+                
+                el.innerHTML = `
+                    <div style="display: flex; flex-direction: column; max-width: 80%;">
+                         <span style="strong; color: var(--neon-cyan); font-family: 'Share Tech Mono', monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${doc.source}">${doc.source}</span>
+                         <span style="font-size: 9px; color: var(--text-muted);">${doc.chunk_count} chunks // ${dateStr}</span>
+                    </div>
+                    <span class="delete-doc-btn" style="color: var(--neon-purple); cursor: pointer; font-size: 16px; font-weight: bold; padding: 0 4px;" title="Forget Document">&times;</span>
+                `;
+                const delBtn = el.querySelector(".delete-doc-btn");
+                delBtn.addEventListener("click", () => deleteRAGDocument(doc.source));
+                documentsList.appendChild(el);
+            });
+        } catch (err) {
+            console.error("Failed to load documents list:", err);
+        }
+    }
+
+    async function handleRAGUpload(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+        
+        uploadStatus.style.color = "var(--neon-cyan)";
+        uploadStatus.textContent = `Processing and chunking '${file.name}'...`;
+        addLog(`[RAG] Initiating upload for: ${file.name}`);
+        
+        const formData = new FormData();
+        formData.append("file", file);
+        
+        try {
+            const res = await fetch("/api/rag/upload", {
+                method: "POST",
+                body: formData
+            });
+            
+            if (res.ok) {
+                const result = await res.json();
+                uploadStatus.style.color = "var(--text-positive)";
+                uploadStatus.textContent = `Successfully indexed ${result.data.chunk_count} chunks, Sir.`;
+                addLog(`[RAG] Successfully indexed ${file.name} (${result.data.chunk_count} chunks).`, "positive");
+                ragFileInput.value = "";
+                await fetchRAGDocuments();
+                // Refresh facts list as well
+                await fetchFacts();
+            } else {
+                const data = await res.json();
+                throw new Error(data.detail || "Upload failed");
+            }
+        } catch (err) {
+            console.error("RAG upload failed:", err);
+            uploadStatus.style.color = "var(--text-negative)";
+            uploadStatus.textContent = `Index failed: ${err.message}`;
+            addLog(`[ERROR] Document ingestion failed: ${err.message}`, "error");
+        }
+    }
+
+    async function deleteRAGDocument(sourceName) {
+        if (!confirm(`Forget document '${sourceName}' and delete all its chunks, Sir?`)) return;
+        try {
+            const res = await fetch(`/api/rag/documents/${encodeURIComponent(sourceName)}`, {
+                method: "DELETE"
+            });
+            if (res.ok) {
+                addLog(`[RAG] Removed document '${sourceName}' from library.`, "system");
+                await fetchRAGDocuments();
+                // Refresh facts list as well
+                await fetchFacts();
+            } else {
+                throw new Error("Delete document failed");
+            }
+        } catch (err) {
+            console.error("Delete RAG document failed:", err);
+            addLog(`[ERROR] Failed to delete document: ${err.message}`, "error");
         }
     }
 
