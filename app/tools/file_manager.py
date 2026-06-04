@@ -53,6 +53,42 @@ def read_file(path: str) -> str:
         logger.error(f"Failed to read file {path}: {e}")
         return f"Failed to read file, Sir: {e}"
 
+def list_directory(path: str) -> str:
+    """
+    List all files and subdirectories in a directory path.
+    """
+    try:
+        p = Path(path)
+        if not p.exists():
+            return f"Error: Directory '{path}' does not exist, Sir."
+        if not p.is_dir():
+            return f"Error: '{path}' is a file, not a directory, Sir."
+        
+        items = list(p.iterdir())
+        if not items:
+            return f"The directory '{path}' is empty, Sir."
+            
+        lines = [f"Contents of directory '{path}':"]
+        for item in sorted(items, key=lambda x: (not x.is_dir(), x.name.lower())):
+            item_type = "Folder" if item.is_dir() else "File"
+            size_str = ""
+            if item.is_file():
+                try:
+                    size = item.stat().st_size
+                    if size < 1024:
+                        size_str = f" ({size} B)"
+                    elif size < 1024 * 1024:
+                        size_str = f" ({size / 1024:.1f} KB)"
+                    else:
+                        size_str = f" ({size / (1024 * 1024):.1f} MB)"
+                except Exception:
+                    pass
+            lines.append(f"- [{item_type}] {item.name}{size_str}")
+        return "\n".join(lines)
+    except Exception as e:
+        logger.error(f"Failed to list directory {path}: {e}")
+        return f"Failed to list directory, Sir: {e}"
+
 # Callbacks for restricted actions
 
 def _rename_file_callback(old_path: str, new_path: str) -> str:

@@ -49,6 +49,10 @@ class TTSRequest(BaseModel):
     text: str
     voice: Optional[str] = None
 
+class ClientLogRequest(BaseModel):
+    level: str
+    message: str
+
 # Mount static folders
 # Ensure directories exist
 GUI_DIR = Path(__file__).resolve().parent / "gui"
@@ -78,6 +82,16 @@ async def get_index():
         raise HTTPException(status_code=404, detail="Dashboard index.html not found.")
     with open(index_path, "r", encoding="utf-8") as f:
         return f.read()
+
+@app.post("/api/log")
+async def client_log(request: ClientLogRequest):
+    if request.level.lower() == "error":
+        logger.error(f"[CLIENT ERROR] {request.message}")
+    elif request.level.lower() == "warning":
+        logger.warning(f"[CLIENT WARN] {request.message}")
+    else:
+        logger.info(f"[CLIENT INFO] {request.message}")
+    return {"status": "ok"}
 
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat_endpoint(request: ChatRequest):
@@ -190,6 +204,11 @@ async def deny_permission(action_id: str):
     res = pm.deny_action(action_id)
     if res.get("status") == "success":
          action_type = status.get("type", "action")
+         if action_type == "run_shell_command":
+              details = status.get("details", {})
+              cmd = details.get("command", "")
+              from app.tools.computer import write_audit_log
+              write_audit_log("DENIED", cmd)
          # Add record of denial in SQLite log
          memory.add_chat_message("assistant", f"[DENIED] Action '{action_type}' rejected.")
          return res

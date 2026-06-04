@@ -57,6 +57,24 @@ document.addEventListener("DOMContentLoaded", () => {
         }, 1000);
     }
 
+    async function sendLogToServer(level, message) {
+        try {
+            await fetch("/api/log", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ level: level, message: message })
+            });
+        } catch (e) {}
+    }
+
+    window.onerror = function(message, source, lineno, colno, error) {
+        sendLogToServer("error", `Global JS Error: ${message} at ${source}:${lineno}:${colno}`);
+        return false;
+    };
+    window.onunhandledrejection = function(event) {
+        sendLogToServer("error", `Global Unhandled Promise Rejection: ${event.reason}`);
+    };
+
     // ----------------------------------------------------
     // System Logger (Console Stream)
     // ----------------------------------------------------
@@ -67,6 +85,8 @@ document.addEventListener("DOMContentLoaded", () => {
         line.textContent = `[${timestamp}] ${text}`;
         consoleStream.appendChild(line);
         consoleStream.scrollTop = consoleStream.scrollHeight;
+        
+        sendLogToServer(type === "error" ? "error" : type === "system" ? "warning" : "info", text);
     }
 
     // ----------------------------------------------------
@@ -297,8 +317,21 @@ document.addEventListener("DOMContentLoaded", () => {
     // ----------------------------------------------------
     // Mic Voice Recording (MediaRecorder -> Whisper STT)
     // ----------------------------------------------------
+    let wantsToRecord = false;
+    let recordingStartTime = 0;
+    let isToggled = false;
+
     async function startRecording() {
-        if (isRecording) return;
+        if (isRecording) {
+            if (isToggled) {
+                stopRecording();
+                isToggled = false;
+            }
+            return;
+        }
+        wantsToRecord = true;
+        isToggled = false;
+        recordingStartTime = Date.now();
         audioChunks = [];
         
         // Interrupt any playing speech
@@ -308,7 +341,23 @@ document.addEventListener("DOMContentLoaded", () => {
 
         try {
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+            
+            // Abort if the user released the button before permission was granted
+            if (!wantsToRecord) {
+                stream.getTracks().forEach(track => track.stop());
+                return;
+            }
+
+            let options = {};
+            if (typeof MediaRecorder.isTypeSupported === 'function') {
+                if (MediaRecorder.isTypeSupported('audio/webm')) {
+                    options = { mimeType: 'audio/webm' };
+                } else if (MediaRecorder.isTypeSupported('audio/ogg')) {
+                    options = { mimeType: 'audio/ogg' };
+                }
+            }
+            
+            mediaRecorder = new MediaRecorder(stream, options);
             
             mediaRecorder.ondataavailable = (event) => {
                 if (event.data.size > 0) {
@@ -317,10 +366,19 @@ document.addEventListener("DOMContentLoaded", () => {
             };
 
             mediaRecorder.onstop = async () => {
+                // Stop mic capture tracks after recording stops to prevent encoding truncation
+                stream.getTracks().forEach(track => track.stop());
+
                 setUIState("thinking", "TRANSCRIBING WHISPER");
                 addLog("[AUDIO] Voice capture complete. Commencing transcription...", "info");
                 
-                const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                const audioBlob = new Blob(audioChunks, { type: options.mimeType || 'audio/webm' });
+                if (audioChunks.length === 0 || audioBlob.size === 0) {
+                    addLog("[AUDIO] No audio data captured.", "warning");
+                    setUIState("standby");
+                    return;
+                }
+
                 const formData = new FormData();
                 formData.append("file", audioBlob, "user_voice.webm");
 
@@ -358,7 +416,11 @@ document.addEventListener("DOMContentLoaded", () => {
             isRecording = true;
             setUIState("listening", "LISTENING (MIC CAPTURE)");
             btnMic.classList.add("active");
-            micStatusLabel.textContent = "RELEASE TO SEND";
+            if (isToggled) {
+                micStatusLabel.textContent = "CLICK TO SEND";
+            } else {
+                micStatusLabel.textContent = "RELEASE TO SEND";
+            }
             addLog("[AUDIO] Capturing microphone audio...");
         } catch (err) {
             loggerError("Microphone access denied", err);
@@ -368,6 +430,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     function stopRecording() {
+        wantsToRecord = false;
         if (!isRecording) return;
         isRecording = false;
         btnMic.classList.remove("active");
@@ -375,8 +438,31 @@ document.addEventListener("DOMContentLoaded", () => {
         
         if (mediaRecorder && mediaRecorder.state !== "inactive") {
             mediaRecorder.stop();
-            // Stop mic capture tracks
-            mediaRecorder.stream.getTracks().forEach(track => track.stop());
+        }
+    }
+
+    function handleRelease() {
+        if (!wantsToRecord) {
+            return;
+        }
+
+        if (!isRecording) {
+            const pressDuration = Date.now() - recordingStartTime;
+            if (pressDuration < 300) {
+                isToggled = true;
+                micStatusLabel.textContent = "CLICK TO SEND";
+            } else {
+                wantsToRecord = false;
+            }
+            return;
+        }
+
+        const holdDuration = Date.now() - recordingStartTime;
+        if (holdDuration < 300) {
+            isToggled = true;
+            micStatusLabel.textContent = "CLICK TO SEND";
+        } else {
+            stopRecording();
         }
     }
 
@@ -396,14 +482,14 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // Add mouse & touch handlers for Hold-to-Talk button
     btnMic.addEventListener("mousedown", startRecording);
-    window.addEventListener("mouseup", stopRecording);
+    window.addEventListener("mouseup", handleRelease);
     
     // Mobile Touch events
     btnMic.addEventListener("touchstart", (e) => {
         e.preventDefault();
         startRecording();
     });
-    window.addEventListener("touchend", stopRecording);
+    window.addEventListener("touchend", handleRelease);
 
     // ----------------------------------------------------
     // Memory Operations (Purge Database)
@@ -440,7 +526,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 return;
             }
             
-            panelPermissions.style.display = "block";
+            panelPermissions.style.display = "flex";
             pendingPermissionsList.innerHTML = "";
             
             pending.forEach(action => {
@@ -454,12 +540,17 @@ document.addEventListener("DOMContentLoaded", () => {
                 card.style.gap = "8px";
                 card.style.marginBottom = "8px";
                 
+                // Render key-value pairs beautifully
+                const detailsFormatted = Object.entries(action.details)
+                    .map(([key, val]) => `<span style="color: #00f0ff;">${key.replace("_", " ")}:</span> ${val}`)
+                    .join("<br>");
+
                 card.innerHTML = `
                     <div style="font-family: 'Share Tech Mono', monospace; font-size: 0.85rem; color: #00f0ff; text-transform: uppercase; font-weight: bold; border-bottom: 1px solid rgba(0, 240, 255, 0.1); padding-bottom: 4px;">
                         ${action.type.replace("_", " ")}
                     </div>
                     <div style="font-family: 'Share Tech Mono', monospace; font-size: 0.75rem; color: #c0c0c0; word-break: break-all; max-height: 80px; overflow-y: auto;">
-                        ${JSON.stringify(action.details).replace(/[\{\}\"]/g, "").replace(/:/g, ": ")}
+                        ${detailsFormatted}
                     </div>
                     <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 4px;">
                         <button class="approve-btn" data-id="${action.id}" style="background: rgba(0, 240, 255, 0.1); border: 1px solid #00f0ff; color: #00f0ff; padding: 4px 10px; font-family: 'Share Tech Mono', monospace; font-size: 0.75rem; cursor: pointer; border-radius: 2px;">APPROVE</button>

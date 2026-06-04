@@ -11,23 +11,24 @@ def mock_memory():
     memory.save_fact.return_value = True
     return memory
 
-def test_agent_tool_calling(mock_memory):
+@pytest.mark.asyncio
+async def test_agent_tool_calling(mock_memory):
     """Test tool execution logic locally in agent."""
     agent = VaibAgent(mock_memory)
     
     # Test system status
-    status = agent.execute_tool("get_system_status", {})
+    status = await agent.execute_tool("get_system_status", {})
     assert "System Status" in status
     assert "OS:" in status
     
     # Test user preference storage
     pref = "User works as a software designer"
-    res = agent.execute_tool("save_user_preference", {"preference": pref})
+    res = await agent.execute_tool("save_user_preference", {"preference": pref})
     assert "Successfully saved" in res
     mock_memory.save_fact.assert_called_with(pref)
     
     # Test clearing memory
-    clear_res = agent.execute_tool("clear_all_memory", {})
+    clear_res = await agent.execute_tool("clear_all_memory", {})
     assert "cleared" in clear_res
     assert mock_memory.clear_chat_history.called
     assert mock_memory.clear_long_term_memories.called

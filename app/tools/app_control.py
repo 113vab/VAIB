@@ -17,8 +17,12 @@ APP_MAPPINGS = {
 
 def open_app(app_name: str) -> str:
     """
-    Launch a supported application (Chrome, Edge, Notepad, VS Code, File Explorer).
-    Returns a success or failure status message.
+    Launch a supported desktop application (Chrome, Edge, Notepad, VS Code, File Explorer).
+    DO NOT use this tool to open websites, URLs, or domains (e.g., github.com, youtube.com, google.com).
+    For websites or web page navigation, use browser_navigate or browser_search instead.
+    
+    Args:
+        app_name: The name of the desktop application to open.
     """
     name_lower = app_name.lower().strip()
     # Fuzzy match app name

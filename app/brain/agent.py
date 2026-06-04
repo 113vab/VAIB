@@ -19,7 +19,13 @@ from app.tools import (
     delete_file,
     capture_screenshot,
     read_clipboard,
-    write_clipboard
+    write_clipboard,
+    list_directory,
+    run_shell_command,
+    browser_search,
+    browser_navigate,
+    browser_click,
+    browser_input
 )
 
 # Define System Prompt for V.A.I.B.
@@ -62,7 +68,13 @@ class VaibAgent:
             delete_file,
             capture_screenshot,
             read_clipboard,
-            write_clipboard
+            write_clipboard,
+            list_directory,
+            run_shell_command,
+            browser_search,
+            browser_navigate,
+            browser_click,
+            browser_input
         ]
 
         if not self.api_key:
@@ -120,7 +132,7 @@ class VaibAgent:
         )
         return status
 
-    def execute_tool(self, name: str, args: Dict[str, Any]) -> Union[str, Dict[str, Any]]:
+    async def execute_tool(self, name: str, args: Dict[str, Any]) -> Union[str, Dict[str, Any]]:
         """Match and execute tool by name."""
         logger.info(f"Executing tool '{name}' with args {args}")
         try:
@@ -154,6 +166,18 @@ class VaibAgent:
                 return read_clipboard()
             elif name == "write_clipboard":
                 return write_clipboard(**args)
+            elif name == "list_directory":
+                return list_directory(**args)
+            elif name == "run_shell_command":
+                return run_shell_command(**args)
+            elif name == "browser_search":
+                return await browser_search(**args)
+            elif name == "browser_navigate":
+                return await browser_navigate(**args)
+            elif name == "browser_click":
+                return await browser_click(**args)
+            elif name == "browser_input":
+                return await browser_input(**args)
             else:
                 return f"Error: Tool '{name}' is not recognized."
         except Exception as e:
@@ -180,9 +204,38 @@ class VaibAgent:
         elif "screenshot" in user_lower or "screen shot" in user_lower:
             res = capture_screenshot()
             final_text = f"I've captured a screenshot, Sir. Saved to: {res}"
+        elif "search" in user_lower:
+            query = user_input[user_lower.find("search") + 6:].strip()
+            query_lower = query.lower()
+            for prefix in ["google for", "duckduckgo for", "bing for", "yahoo for", "for"]:
+                if query_lower.startswith(prefix):
+                    query = query[len(prefix):].strip()
+                    break
+            final_text = await browser_search(query)
+        elif "browse" in user_lower or "navigate" in user_lower:
+            url = ""
+            for term in ["browse", "navigate to", "navigate"]:
+                if term in user_lower:
+                    url = user_input[user_lower.find(term) + len(term):].strip()
+                    break
+            final_text = await browser_navigate(url)
         elif "open" in user_lower:
-            app = user_input[user_lower.find("open") + 4:].strip()
-            final_text = open_app(app)
+            target = user_input[user_lower.find("open") + 4:].strip()
+            
+            def is_url_or_domain(text: str) -> bool:
+                t = text.lower().strip()
+                if t.startswith("http://") or t.startswith("https://") or t.startswith("www."):
+                    return True
+                if "." in t and " " not in t:
+                    parts = t.split(".")
+                    if len(parts) >= 2 and parts[-1].isalpha() and len(parts[-1]) >= 2:
+                        return True
+                return False
+
+            if is_url_or_domain(target):
+                final_text = await browser_navigate(target)
+            else:
+                final_text = open_app(target)
         elif "close" in user_lower:
             app = user_input[user_lower.find("close") + 5:].strip()
             res = close_app(app)
@@ -262,6 +315,27 @@ class VaibAgent:
                     pref = pref[len(word):].strip()
                     break
             final_text = self.save_user_preference(pref)
+        elif "list directory" in user_lower or "list folder" in user_lower or "list files" in user_lower:
+            path = "C:/Users/visha/friday"
+            if "in " in user_lower:
+                path = user_input[user_lower.find("in ") + 3:].strip()
+            elif "directory " in user_lower:
+                path = user_input[user_lower.find("directory ") + 10:].strip()
+            elif "folder " in user_lower:
+                path = user_input[user_lower.find("folder ") + 7:].strip()
+            final_text = list_directory(path)
+        elif "run command" in user_lower or "shell" in user_lower or "exec" in user_lower or "powershell" in user_lower:
+            cmd = "Get-Process"
+            for term in ["run command", "shell", "exec", "powershell"]:
+                if term in user_lower:
+                    cmd = user_input[user_lower.find(term) + len(term):].strip()
+                    if cmd.startswith(":") or cmd.startswith('"') or cmd.startswith("'"):
+                        cmd = cmd[1:].strip()
+                    if cmd.endswith('"') or cmd.endswith("'"):
+                        cmd = cmd[:-1].strip()
+                    break
+            res = run_shell_command(cmd)
+            final_text = handle_possible_permission(res)
         else:
             facts = self.memory.query_facts(user_input, limit=2)
             facts_text = ""
@@ -340,16 +414,18 @@ class VaibAgent:
                 for part in parts:
                     if part.function_call:
                         fc = part.function_call
-                        tool_result = self.execute_tool(fc.name, dict(fc.args))
+                        tool_result = await self.execute_tool(fc.name, dict(fc.args))
                         
                         # Handle potential permissions dict return
                         if isinstance(tool_result, dict) and tool_result.get("status") == "pending_approval":
-                            logger.info(f"Tool execution gated by permission. Halting LLM loop.")
-                            # Convert dict to string for tool response consistency
-                            import json
-                            tool_result_str = json.dumps(tool_result)
-                        else:
-                            tool_result_str = str(tool_result)
+                            logger.info(f"Tool execution gated by permission. Halting LLM loop and returning to user.")
+                            action_id = tool_result.get("action_id")
+                            final_text = f"I need your confirmation to execute this action, Sir. A prompt has been posted to your dashboard (Action ID: {action_id})."
+                            self.memory.add_chat_message("user", user_input)
+                            self.memory.add_chat_message("assistant", final_text)
+                            return final_text
+                        
+                        tool_result_str = str(tool_result)
 
                         function_response_parts.append({
                             "function_response": {
