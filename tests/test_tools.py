@@ -370,3 +370,130 @@ async def test_browser_automation_mock():
         input_res = await browser_input("#input", "vaib")
         assert "Successfully typed" in input_res
         mock_page.fill.assert_called_with("#input", "vaib")
+
+# ----------------------------------------------------
+# 7. Phase 3 Tools Tests
+# ----------------------------------------------------
+def test_vision_webcam_mock(temp_dir):
+    from app.tools.vision import capture_webcam_frame
+    
+    mock_cap = MagicMock()
+    mock_cap.isOpened.return_value = True
+    mock_cap.read.return_value = (True, MagicMock())
+    
+    with patch("cv2.VideoCapture", return_value=mock_cap), \
+         patch("cv2.imwrite", return_value=True), \
+         patch("app.tools.vision.DATA_DIR", temp_dir):
+        
+        res = capture_webcam_frame()
+        assert "webcam_" in res
+        assert res.endswith(".jpg")
+
+def test_vision_analysis_mock(temp_dir):
+    from app.tools.vision import analyze_image_with_vision
+    
+    # Setup test file
+    test_img = temp_dir / "test.jpg"
+    test_img.write_text("dummy content")
+    
+    mock_response = MagicMock()
+    mock_response.text = "This is a beautiful test image description."
+    
+    mock_model = MagicMock()
+    mock_model.generate_content.return_value = mock_response
+    
+    with patch("google.generativeai.GenerativeModel", return_value=mock_model), \
+         patch("app.tools.vision.GEMINI_API_KEY", "mock_key"), \
+         patch("PIL.Image.open", return_value=MagicMock()):
+        
+        res = analyze_image_with_vision(str(test_img), "Describe this")
+        assert "beautiful test image description" in res
+
+
+def test_productivity_reminders_and_calendar(temp_dir):
+    from app.tools.productivity import (
+        add_reminder,
+        list_reminders,
+        add_calendar_event,
+        get_calendar_events,
+        delete_calendar_event
+    )
+    
+    db_file = temp_dir / "history.db"
+    
+    with patch("app.tools.productivity.DB_PATH", db_file):
+        # 1. Initialize tables
+        from app.tools.productivity import init_productivity_db
+        init_productivity_db()
+        
+        # 2. Add reminder
+        rem_res = add_reminder("Walk the dog", 10)
+        assert "remind you to 'Walk the dog'" in rem_res
+        
+        # 3. List reminders
+        list_res = list_reminders()
+        assert "Walk the dog" in list_res
+        
+        # 4. Calendar event
+        cal_res = add_calendar_event("Meeting", "2026-06-04", "15:00", "Discuss milestone")
+        assert "booked event 'Meeting'" in cal_res
+        
+        # 5. Get events
+        sched_res = get_calendar_events("2026-06-04")
+        assert "Meeting" in sched_res
+        
+        # 6. Delete event
+        import sqlite3
+        conn = sqlite3.connect(db_file)
+        cursor = conn.cursor()
+        cursor.execute("SELECT id FROM calendar_events WHERE title='Meeting'")
+        ev_id = cursor.fetchone()[0]
+        conn.close()
+        
+        del_res = delete_calendar_event(ev_id)
+        assert f"removed event 'Meeting' (ID {ev_id})" in del_res
+
+def test_productivity_email(temp_dir):
+    from app.tools.productivity import draft_email
+    
+    with patch("app.tools.productivity.DATA_DIR", temp_dir), \
+         patch("webbrowser.open") as mock_open:
+        
+        res = draft_email("test@example.com", "Test Subj", "Test Body")
+        assert "drafted the email" in res
+        assert mock_open.called
+        
+        # Verify file is saved in drafts
+        drafts_dir = temp_dir / "drafts"
+        assert drafts_dir.exists()
+        files = list(drafts_dir.glob("*.eml"))
+        assert len(files) == 1
+        content = files[0].read_text(encoding="utf-8")
+        assert "To: test@example.com" in content
+        assert "Subject: Test Subj" in content
+        assert "Test Body" in content
+
+def test_plugins_loader_mock(temp_dir):
+    from app.tools.plugins import load_plugins, plugin_registry
+    
+    # Setup plug folder structure
+    plugins_dir = temp_dir / "plugins"
+    plugins_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Let's clean the registry first to avoid side effects
+    plugin_registry.clear()
+    
+    load_plugins(temp_dir)
+    
+    # Check example plugin was created
+    assert (plugins_dir / "example_plugin.py").exists()
+    
+    # Check that custom functions got registered
+    assert "get_weather_forecast" in plugin_registry
+    assert "roll_dice" in plugin_registry
+    
+    # Run a registered plugin
+    weather_func = plugin_registry["get_weather_forecast"]
+    weather_res = weather_func("London")
+    assert "forecast for London" in weather_res
+

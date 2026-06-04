@@ -20,3 +20,14 @@ from app.tools.browser import (
     browser_click,
     browser_input
 )
+from app.tools.vision import capture_webcam_frame, analyze_image_with_vision
+from app.tools.productivity import (
+    add_reminder,
+    list_reminders,
+    add_calendar_event,
+    get_calendar_events,
+    delete_calendar_event,
+    draft_email
+)
+from app.tools.plugins import load_plugins, plugin_registry, vaib_tool
+

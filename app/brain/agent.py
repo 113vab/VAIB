@@ -25,7 +25,17 @@ from app.tools import (
     browser_search,
     browser_navigate,
     browser_click,
-    browser_input
+    browser_input,
+    capture_webcam_frame,
+    analyze_image_with_vision,
+    add_reminder,
+    list_reminders,
+    add_calendar_event,
+    get_calendar_events,
+    delete_calendar_event,
+    draft_email,
+    load_plugins,
+    plugin_registry
 )
 
 # Define System Prompt for V.A.I.B.
@@ -74,8 +84,25 @@ class VaibAgent:
             browser_search,
             browser_navigate,
             browser_click,
-            browser_input
+            browser_input,
+            capture_webcam_frame,
+            analyze_image_with_vision,
+            add_reminder,
+            list_reminders,
+            add_calendar_event,
+            get_calendar_events,
+            delete_calendar_event,
+            draft_email
         ]
+
+        # Load dynamic plugins
+        from app.config import BASE_DIR
+        load_plugins(BASE_DIR)
+        
+        # Add all custom plugin tools to tools_list dynamically
+        for name, func in plugin_registry.items():
+            if func not in self.tools_list:
+                self.tools_list.append(func)
 
         if not self.api_key:
             logger.warning("GEMINI_API_KEY is not set in environment or .env file. V.A.I.B. will operate in local Simulation Mode.")
@@ -178,6 +205,28 @@ class VaibAgent:
                 return await browser_click(**args)
             elif name == "browser_input":
                 return await browser_input(**args)
+            elif name == "capture_webcam_frame":
+                return capture_webcam_frame()
+            elif name == "analyze_image_with_vision":
+                return analyze_image_with_vision(**args)
+            elif name == "add_reminder":
+                return add_reminder(**args)
+            elif name == "list_reminders":
+                return list_reminders()
+            elif name == "add_calendar_event":
+                return add_calendar_event(**args)
+            elif name == "get_calendar_events":
+                return get_calendar_events(**args)
+            elif name == "delete_calendar_event":
+                return delete_calendar_event(**args)
+            elif name == "draft_email":
+                return draft_email(**args)
+            elif name in plugin_registry:
+                import inspect
+                func = plugin_registry[name]
+                if inspect.iscoroutinefunction(func):
+                    return await func(**args)
+                return func(**args)
             else:
                 return f"Error: Tool '{name}' is not recognized."
         except Exception as e:
@@ -336,6 +385,80 @@ class VaibAgent:
                     break
             res = run_shell_command(cmd)
             final_text = handle_possible_permission(res)
+        elif "webcam" in user_lower or "camera" in user_lower or "take picture" in user_lower or "snap" in user_lower:
+            res = capture_webcam_frame()
+            if res.endswith(".jpg"):
+                final_text = f"I've captured a webcam frame, Sir. Saved to: {res}"
+            else:
+                final_text = res
+        elif "analyze screen" in user_lower or "ocr screen" in user_lower or "read screen" in user_lower:
+            scr = capture_screenshot()
+            if scr.endswith(".png"):
+                final_text = analyze_image_with_vision(scr, "Read the screen contents or text and explain it.")
+            else:
+                final_text = f"Failed to capture screen for analysis, Sir: {scr}"
+        elif "analyze image" in user_lower:
+            parts = user_input.split("analyze image")
+            img_path = parts[1].strip()
+            final_text = analyze_image_with_vision(img_path, "Describe this image.")
+        elif "remind me to" in user_lower or "set reminder" in user_lower:
+            import re
+            sec = 60
+            rem_text = "timer alert"
+            match = re.search(r"in (\d+)\s*(second|minute|hour|sec|min|hr)", user_lower)
+            if match:
+                val = int(match.group(1))
+                unit = match.group(2)
+                if "min" in unit:
+                    sec = val * 60
+                elif "hour" in unit or "hr" in unit:
+                    sec = val * 3600
+                else:
+                    sec = val
+            if "remind me to" in user_lower:
+                rem_idx = user_lower.find("remind me to") + 12
+                rem_text = user_input[rem_idx:]
+                if " in " in rem_text.lower():
+                    rem_text = rem_text[:rem_text.lower().rfind(" in ")].strip()
+            final_text = add_reminder(rem_text, sec)
+        elif "list reminders" in user_lower or "show reminders" in user_lower:
+            final_text = list_reminders()
+        elif "add event" in user_lower or "calendar event" in user_lower:
+            title = "Meeting"
+            date_str = time.strftime("%Y-%m-%d")
+            time_str = "12:00"
+            if "event" in user_lower:
+                title = user_input[user_lower.find("event") + 5:].strip()
+                if " on " in title.lower():
+                    parts = title.split(" on ")
+                    title = parts[0].strip()
+                    rem = parts[1].strip()
+                    if " at " in rem.lower():
+                        date_str, time_str = rem.lower().split(" at ")
+                        date_str = date_str.strip()
+                        time_str = time_str.strip()
+                    else:
+                        date_str = rem
+            final_text = add_calendar_event(title, date_str, time_str)
+        elif "calendar" in user_lower or "schedule" in user_lower:
+            final_text = get_calendar_events()
+        elif "delete event" in user_lower:
+            import re
+            match = re.search(r"\d+", user_lower)
+            if match:
+                ev_id = int(match.group(0))
+                final_text = delete_calendar_event(ev_id)
+            else:
+                final_text = "Please specify the ID of the event to delete, Sir."
+        elif "draft email" in user_lower or "write email" in user_lower:
+            to_addr = "recipient@example.com"
+            subject = "Hello from V.A.I.B."
+            body = "This is a draft message."
+            if "to " in user_lower:
+                rem = user_input[user_lower.find("to ") + 3:].strip()
+                if " " in rem:
+                    to_addr = rem.split(" ")[0]
+            final_text = draft_email(to_addr, subject, body)
         else:
             facts = self.memory.query_facts(user_input, limit=2)
             facts_text = ""

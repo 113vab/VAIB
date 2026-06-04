@@ -72,6 +72,10 @@ app.mount("/audio-cache", StaticFiles(directory=str(DATA_DIR / "audio_cache")), 
 (DATA_DIR / "screenshots").mkdir(parents=True, exist_ok=True)
 app.mount("/screenshots", StaticFiles(directory=str(DATA_DIR / "screenshots")), name="screenshots")
 
+# Mount webcam directory
+(DATA_DIR / "webcam").mkdir(parents=True, exist_ok=True)
+app.mount("/webcam", StaticFiles(directory=str(DATA_DIR / "webcam")), name="webcam")
+
 # Endpoints
 @app.get("/", response_class=HTMLResponse)
 async def get_index():
@@ -227,6 +231,42 @@ async def status_endpoint():
         "stt": "local-whisper (tiny)",
         "tts": "edge-tts (Sonia)"
     }
+
+@app.get("/api/notifications/poll")
+async def poll_notifications():
+    """Poll for reminders that need to be triggered."""
+    import sqlite3
+    import time
+    DB_PATH = DATA_DIR / "history.db"
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        # Query reminders that are overdue and not yet triggered
+        current_time = time.time()
+        cursor.execute(
+            "SELECT id, text FROM reminders WHERE is_triggered = 0 AND trigger_time <= ?",
+            (current_time,)
+        )
+        rows = cursor.fetchall()
+        
+        triggered = []
+        if rows:
+            for row in rows:
+                rem_id, text = row
+                triggered.append({"id": rem_id, "text": text})
+                # Update status to triggered
+                cursor.execute(
+                    "UPDATE reminders SET is_triggered = 1 WHERE id = ?",
+                    (rem_id,)
+                )
+            conn.commit()
+            
+        conn.close()
+        return {"notifications": triggered}
+    except Exception as e:
+        logger.error(f"Error polling notifications: {e}")
+        return {"notifications": []}
 
 # Also mount static assets under /static for stylesheet, scripts, etc.
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")

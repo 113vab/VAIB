@@ -45,6 +45,9 @@ document.addEventListener("DOMContentLoaded", () => {
     
     // Poll for pending permissions every 3 seconds
     setInterval(fetchPendingPermissions, 3000);
+    
+    // Poll for active reminders every 3 seconds
+    setInterval(fetchReminders, 3000);
 
     // ----------------------------------------------------
     // Clock HUD Display
@@ -604,6 +607,28 @@ document.addEventListener("DOMContentLoaded", () => {
             });
         } catch (err) {
             console.error("Failed to fetch pending permissions:", err);
+        }
+    }
+
+    // ----------------------------------------------------
+    // Reminders & Active Timers Polling
+    // ----------------------------------------------------
+    async function fetchReminders() {
+        try {
+            const res = await fetch("/api/notifications/poll");
+            if (!res.ok) return;
+            const data = await res.json();
+            
+            if (data.notifications && data.notifications.length > 0) {
+                for (const notif of data.notifications) {
+                    const text = `Sir, this is a reminder: ${notif.text}`;
+                    addLog(`[TIMER ALERT] Reminder triggered: "${notif.text}"`, "system");
+                    appendChatBubble("assistant", `[REMINDER] ${notif.text}`);
+                    await playTTS(text);
+                }
+            }
+        } catch (err) {
+            console.error("Failed to poll reminders:", err);
         }
     }
 

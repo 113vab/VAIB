@@ -63,5 +63,33 @@ if __name__ == "__main__":
     status_res = make_request("/api/chat", {"message": "what is my favorite language?"})
     print(f"Chat response (recall preference): '{status_res.get('response') if status_res else 'None'}'")
     
-    # Check SQLite chat history log
+    # 6. Verify Reminders & Alarm Scheduler
+    print("\n6. Verifying Reminders/Alarms...")
+    rem_res = make_request("/api/chat", {"message": "remind me to call the chief in 1 second"})
+    print(f"Chat response (set reminder): '{rem_res.get('response') if rem_res else 'None'}'")
+    time.sleep(2)
+    poll_res = make_request("/api/notifications/poll")
+    if poll_res and "notifications" in poll_res:
+        notifs = poll_res["notifications"]
+        print(f"SUCCESS: Notification poll returned {len(notifs)} items: {notifs}")
+    else:
+        print("FAIL: Failed to poll triggered reminders.")
+
+    # 7. Verify Calendar event
+    print("\n7. Verifying Calendar Events...")
+    cal_res = make_request("/api/chat", {"message": "add event Team Sync on 2026-06-05 at 10:00"})
+    print(f"Chat response (add calendar event): '{cal_res.get('response') if cal_res else 'None'}'")
+    list_cal = make_request("/api/chat", {"message": "show my calendar"})
+    print(f"Chat response (list calendar): '{list_cal.get('response') if list_cal else 'None'}'")
+
+    # 8. Verify dynamic plugins loading
+    print("\n8. Verifying Dynamic Plugins...")
+    from pathlib import Path
+    plugins_dir = Path("plugins")
+    if plugins_dir.exists() and (plugins_dir / "example_plugin.py").exists():
+        print("SUCCESS: Dynamic plugins directory exists and example_plugin.py is generated.")
+    else:
+        print("FAIL: Dynamic plugins directory or example_plugin.py not found.")
+        
     print("\nVerification process complete, Sir.")
+
