@@ -207,6 +207,7 @@ class VADEngine extends EventEmitter {
             };
             this.mediaRecorder.start();
             this.isRecording = true;
+            startStreamingRecognition();
         } catch (e) {
             console.error("VADRecorder error starting:", e);
         }
@@ -227,6 +228,7 @@ class VADEngine extends EventEmitter {
             console.error("VADRecorder error stopping:", e);
         }
         this.isRecording = false;
+        stopStreamingRecognition();
     }
 }
 
@@ -425,6 +427,7 @@ class VoiceSessionManager extends EventEmitter {
                 
                 try {
                     const text = await this.stt.transcribe(audioBlob);
+                    updateStreamingHUD(text);
                     this.emit("stt.complete", text);
                 } catch (e) {
                     addLog(`[ERROR] STT failed: ${e.message || e}`, "error");
@@ -433,6 +436,7 @@ class VoiceSessionManager extends EventEmitter {
             } else if (this.state === "idle") {
                 try {
                     const text = await this.stt.transcribe(audioBlob);
+                    updateStreamingHUD(text);
                     if (text.trim()) {
                         const wakeMatch = text.match(/\b(hey\s+vaib|vaib)\b/i);
                         if (wakeMatch) {
@@ -605,6 +609,11 @@ document.addEventListener("DOMContentLoaded", () => {
     let webSpeechRecognizer = null;
     let webSpeechActive = false;
 
+    // Streaming speech recognition
+    let streamingRecognizer = null;
+    let streamingActive = false;
+    let currentStreamingTranscript = "";
+
     // Instantiate Decoupled Voice Subsystem Components
     const sttPipeline = new STTPipeline();
     const llmPipeline = new LLMPipeline();
@@ -650,6 +659,7 @@ document.addEventListener("DOMContentLoaded", () => {
     startClock();
     fetchDiagnostics();
     initWebSpeechRecognition();
+    initStreamingRecognition();
     fetchPendingPermissions();
     fetchProfile();
     fetchFacts();
@@ -791,6 +801,87 @@ document.addEventListener("DOMContentLoaded", () => {
             };
         } else {
             addLog("[SYSTEM] Browser Speech Recognition API not supported.", "system");
+        }
+    }
+
+    // ----------------------------------------------------
+    // Streaming STT & HUD Update Utilities
+    // ----------------------------------------------------
+    function initStreamingRecognition() {
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (SpeechRecognition) {
+            streamingRecognizer = new SpeechRecognition();
+            streamingRecognizer.continuous = true;
+            streamingRecognizer.interimResults = true;
+            streamingRecognizer.lang = 'en-US';
+
+            streamingRecognizer.onstart = () => {
+                streamingActive = true;
+                currentStreamingTranscript = "";
+                updateStreamingHUD("Listening...");
+            };
+
+            streamingRecognizer.onresult = (event) => {
+                let interimTranscript = "";
+                let finalTranscript = "";
+
+                for (let i = event.resultIndex; i < event.results.length; ++i) {
+                    if (event.results[i].isFinal) {
+                        finalTranscript += event.results[i][0].transcript;
+                    } else {
+                        interimTranscript += event.results[i][0].transcript;
+                    }
+                }
+
+                const fullTranscript = finalTranscript + interimTranscript;
+                currentStreamingTranscript = fullTranscript;
+                if (fullTranscript.trim()) {
+                    updateStreamingHUD(fullTranscript);
+                }
+            };
+
+            streamingRecognizer.onerror = (e) => {
+                if (e.error !== "no-speech" && e.error !== "aborted") {
+                    console.error("Streaming STT Error:", e.error);
+                }
+            };
+
+            streamingRecognizer.onend = () => {
+                streamingActive = false;
+            };
+        } else {
+            console.warn("Speech Recognition API not supported in this browser.");
+        }
+    }
+
+    function startStreamingRecognition() {
+        if (webSpeechRecognizer && webSpeechActive) {
+            try { webSpeechRecognizer.abort(); } catch (e) {}
+        }
+        if (streamingRecognizer && !streamingActive) {
+            try {
+                streamingRecognizer.start();
+            } catch (e) {
+                console.error("Failed to start streaming STT:", e);
+            }
+        }
+    }
+
+    function stopStreamingRecognition() {
+        if (streamingRecognizer && streamingActive) {
+            try {
+                streamingRecognizer.stop();
+            } catch (e) {
+                console.error("Failed to stop streaming STT:", e);
+            }
+        }
+    }
+
+    function updateStreamingHUD(text) {
+        const hud = document.getElementById("streaming-transcript-hud");
+        if (hud) {
+            hud.textContent = text;
+            hud.scrollTop = hud.scrollHeight;
         }
     }
 
@@ -992,6 +1083,7 @@ document.addEventListener("DOMContentLoaded", () => {
                         const sttData = await sttRes.json();
                         const text = sttData.text;
                         addLog(`[WHISPER] Transcribed: "${text}"`, "positive");
+                        updateStreamingHUD(text);
                         if (text.trim()) {
                             await handleUserMessage(text);
                         } else {
@@ -1028,6 +1120,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 micStatusLabel.textContent = "RELEASE TO SEND";
             }
             addLog("[AUDIO] Capturing microphone audio...");
+            startStreamingRecognition();
         } catch (err) {
             loggerError("Microphone access denied", err);
             addLog("[SYSTEM] Direct mic recording failed. Triggering browser fallback...", "system");
@@ -1045,6 +1138,7 @@ document.addEventListener("DOMContentLoaded", () => {
         if (mediaRecorder && mediaRecorder.state !== "inactive") {
             mediaRecorder.stop();
         }
+        stopStreamingRecognition();
     }
 
     function handleRelease() {

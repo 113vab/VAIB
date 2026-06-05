@@ -36,7 +36,7 @@ async def test_agent_tool_calling(mock_memory):
 @pytest.mark.asyncio
 async def test_agent_generate_response_offline(mock_memory):
     """Test response generation fallback when Gemini model is offline (API key missing)."""
-    with patch("app.brain.agent.GEMINI_API_KEY", ""):
+    with patch("app.config.GEMINI_API_KEY", ""):
         agent = VaibAgent(mock_memory)
         response = await agent.generate_response("Hello VAIB")
         assert "simulation mode" in response or "API key" in response

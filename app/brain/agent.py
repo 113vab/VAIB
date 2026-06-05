@@ -113,25 +113,15 @@ class VaibAgent:
             if func not in self.tools_list:
                 self.tools_list.append(func)
 
-        self.model = None
-        if self.provider == "gemini":
-            if not self.api_key:
-                logger.warning("GEMINI_API_KEY is not set in environment or .env file. V.A.I.B. will operate in local Simulation Mode.")
-                return
-                
-            genai.configure(api_key=self.api_key)
-            
-            try:
-                self.model = genai.GenerativeModel(
-                    model_name=self.model_name,
-                    system_instruction=SYSTEM_PROMPT,
-                    tools=self.tools_list
-                )
-                logger.info(f"Gemini model '{self.model_name}' initialized successfully with tool calling.")
-            except Exception as e:
-                logger.error(f"Failed to initialize Gemini model: {e}")
-        else:
-            logger.info(f"Multi-LLM Preparation: Selected provider '{self.provider}' with model '{self.model_name}'. Ready for expansion.")
+        # Initialize LLM Provider Router
+        from app.brain.providers import LLMProviderRouter
+        self.router = LLMProviderRouter(
+            provider=self.provider,
+            model_name=self.model_name,
+            tools=self.tools_list
+        )
+        self.model = self.router.get_active_model_for_summarizer()
+        logger.info(f"LLM Provider Router initialized. Preferred provider: '{self.provider}', model: '{self.model_name}'")
 
     # Tools definition (must have docstrings and type annotations for Gemini to parse schemas)
     def save_user_preference(self, preference: str) -> str:
@@ -536,21 +526,8 @@ class VaibAgent:
     async def generate_response(self, user_input: str) -> str:
         """
         Processes user query, queries memory, runs tool calls, updates memory, and returns assistant text.
-        Dynamic routing for multi-LLM capability.
+        All LLM calls are routed through the Provider Router with fallback.
         """
-        if self.provider == "gemini":
-            return await self._generate_gemini_response(user_input)
-        else:
-            logger.warning(f"LLM provider '{self.provider}' is prepared but not fully implemented. Falling back to simulation mode.")
-            return await self._generate_response_simulation(user_input)
-
-    async def _generate_gemini_response(self, user_input: str) -> str:
-        """
-        Processes user query specifically via Gemini API with tool calling support.
-        """
-        if not self.model:
-            return await self._generate_response_simulation(user_input)
-
         try:
             # 1. Build cognitive system context (Profile, Summary, semantic Facts)
             system_context = self.context_manager.build_system_context(user_input)
@@ -558,109 +535,30 @@ class VaibAgent:
             # 2. Retrieve recent chat history
             history = self.memory.get_chat_history(limit=10)
             
-            # 3. Build contents for Gemini
-            contents = []
+            # 3. Route response generation through provider router
+            final_text = await self.router.generate_response(
+                system_context=system_context,
+                history=history,
+                user_input=user_input,
+                tools=self.tools_list,
+                execute_tool_callback=self.execute_tool
+            )
             
-            # Add context message as first turn if we have system_context
-            if system_context:
-                contents.append({
-                    "role": "user",
-                    "parts": [{"text": f"[System Context (DO NOT REPEAT VERBATIM unless relevant)]:\n{system_context}\nPlease keep this in mind during the conversation."}]
-                })
-                contents.append({
-                    "role": "model",
-                    "parts": [{"text": "Acknowledged, Sir. I have loaded the profile preferences, conversation summaries, and recalled long-term details."}]
-                })
-            
-            # Add chat history
-            for msg in history:
-                contents.append({
-                    "role": "user" if msg["role"] == "user" else "model",
-                    "parts": [{"text": msg["content"]}]
-                })
-            
-            # Add current user input
-            contents.append({
-                "role": "user",
-                "parts": [{"text": user_input}]
-            })
-
-            # 4. Generate response with tool-calling support
-            response = self.model.generate_content(contents)
-            
-            candidates = response.candidates
-            if not candidates or len(candidates) == 0:
-                return "I apologize, Sir, but I'm unable to compile a response right now."
-                
-            candidate = candidates[0]
-            parts = candidate.content.parts
-            
-            max_turns = 5
-            turns = 0
-            
-            while parts and any(part.function_call for part in parts) and turns < max_turns:
-                turns += 1
-                logger.info(f"LLM requested tool execution (turn {turns})")
-                
-                contents.append(candidate.content)
-                function_response_parts = []
-                
-                for part in parts:
-                    if part.function_call:
-                        fc = part.function_call
-                        tool_result = await self.execute_tool(fc.name, dict(fc.args))
-                        
-                        # Handle potential permissions dict return
-                        if isinstance(tool_result, dict) and tool_result.get("status") == "pending_approval":
-                            logger.info(f"Tool execution gated by permission. Halting LLM loop and returning to user.")
-                            action_id = tool_result.get("action_id")
-                            final_text = f"I need your confirmation to execute this action, Sir. A prompt has been posted to your dashboard (Action ID: {action_id})."
-                            self.memory.add_chat_message("user", user_input)
-                            self.memory.add_chat_message("assistant", final_text)
-                            return final_text
-                        
-                        tool_result_str = str(tool_result)
-
-                        function_response_parts.append({
-                            "function_response": {
-                                "name": fc.name,
-                                "response": {"result": tool_result_str}
-                            }
-                        })
-                
-                contents.append({
-                    "role": "user",
-                    "parts": function_response_parts
-                })
-                
-                response = self.model.generate_content(contents)
-                candidates = response.candidates
-                if not candidates or len(candidates) == 0:
-                    break
-                candidate = candidates[0]
-                parts = candidate.content.parts
-            
-            final_text = ""
-            if candidates and len(candidates) > 0:
-                text_parts = [p.text for p in candidates[0].content.parts if p.text]
-                final_text = "".join(text_parts).strip()
-            
-            if not final_text:
-                final_text = "I have executed the requested actions, Sir."
+            # If the router fell back to simulation mode text, we execute the local keyword-based simulation
+            if "Simulation Mode" in final_text:
+                logger.warning("Router fell back to Simulation Mode. Executing local keyword-based simulation.")
+                return await self._generate_response_simulation(user_input)
 
             # Save this turn to SQLite history
             self.memory.add_chat_message("user", user_input)
             self.memory.add_chat_message("assistant", final_text)
             
-            # Trigger automatic summarization checklist asynchronously/background
-            self.summarizer.auto_summarize_if_needed(self.model)
+            # Trigger automatic summarization checklist
+            active_gemini_model = self.router.get_active_model_for_summarizer()
+            self.summarizer.auto_summarize_if_needed(active_gemini_model)
             
             return final_text
             
         except Exception as e:
-            err_msg = str(e)
-            if "429" in err_msg or "quota" in err_msg.lower():
-                logger.warning("Gemini API key quota exceeded. Falling back to offline Simulation Mode.")
-                return await self._generate_response_simulation(user_input)
             logger.error(f"Error in agent generate_response: {e}")
             return f"I ran into an internal error processing that, Sir: {str(e)}"
