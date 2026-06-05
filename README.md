@@ -117,8 +117,13 @@ pytest
 ```
 All tests run locally offline using mocked voice/brain pipelines.
 
-⚠️ VAIB is proprietary software.
+# License
 
-This repository is provided for educational and portfolio review purposes only.
+VAIB is released under the VAIB Source-Available License v1.0.
 
-Commercial use, redistribution, resale, or creation of derivative commercial products is prohibited without written permission from the author.
+You may view, study, and learn from the source code for educational purposes.
+
+Commercial use, redistribution, resale, republication, and creation of competing derivative products are prohibited without prior written permission from the author.
+
+
+
