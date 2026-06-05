@@ -63,11 +63,31 @@ The objective of Phase 3 is to make V.A.I.B. a powerful daily productivity partn
 
 ---
 
-## 4. Next Actions
-1. **Approve Phase 2 plan**.
-2. Initialize Playwright inside virtual environment:
-   ```bash
-   .\venv\Scripts\playwright install chromium
-   ```
-3. Implement `app/tools/computer.py` (Shell and Launcher).
-4. Implement `app/tools/browser.py` (Playwright Browser controller).
+## Phase 4: Advanced Voice Assistant & Stabilization (Milestones)
+
+The objective of Phase 4 is to transition V.A.I.B. into an automated, natural voice partner with continuous monitoring, event-driven components, and enterprise-level reliability.
+
+### 1. Continuous Listening & VAD (Phase 4D)
+- **Wake Word Detection**: Background recording scans for "Hey VAIB" or "VAIB" using fast boundary-matching regex.
+- **Voice Activity Detection (VAD)**: Real-time client-side RMS volume analyzer automatically starts/stops audio segments.
+- **Continuous Mode**: Stays awake, processing consecutive queries without wake words, and automatically enters standby after 30 seconds of inactivity.
+- **Vocal Interruption (Interruptible TTS)**: Instantly silences Edge-TTS playback upon detecting user speech, shifting to active record/listening mode.
+- **Holographic Voice HUD**: States (`Idle`, `Listening`, `Processing`, `Speaking`) visual feedback.
+- **Decoupled Architecture**: Fully isolated STT, LLM, and TTS pipelines driven by custom event emitters.
+
+### 2. Security Hardening & Multi-LLM Preparation (Phase 4E)
+- **Security Audit & Trail**: Shell execution blacklists, file extension validators, and secure browser launch flags.
+- **Multi-LLM Preparation**: Abstracted agent clients supporting Gemini (native), OpenAI, Anthropic, or Local Ollama models using provider-based configs.
+- **Documentation & Walkthrough**: Automated verification integration reports and detailed guides.
+
+---
+
+## Phase 5: Real-Time Conversational Assistant
+
+The objective of Phase 5 is to transition from turn-based (VAD file-blob sending) to true real-time, low-latency streaming.
+
+### Key Milestones:
+1. **WebSocket Audio Streaming**: Continuous streaming of raw PCM chunks from client to server.
+2. **Streaming STT & TTS**: Real-time word-by-word transcription and streaming audio playback.
+3. **Turn-Taking Protocol**: Asynchronous negotiation to handle simultaneous talking and interruption protocols over duplex channels.
+

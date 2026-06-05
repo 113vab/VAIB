@@ -1,6 +1,39 @@
 // V.A.I.B. Core HUD JavaScript Logic
 
 // ----------------------------------------------------
+// Global UI routing helpers for decoupled voice subsystem access
+// ----------------------------------------------------
+function addLog(text, type = "info") {
+    if (window.addLog) window.addLog(text, type);
+    else console.log(`[${type}] ${text}`);
+}
+
+function setUIState(state, text = "") {
+    if (window.setUIState) window.setUIState(state, text);
+    else console.log(`[UI STATE] ${state}: ${text}`);
+}
+
+function appendChatBubble(role, content) {
+    if (window.appendChatBubble) window.appendChatBubble(role, content);
+    else console.log(`[CHAT] ${role}: ${content}`);
+}
+
+function loggerError(context, err) {
+    if (window.loggerError) window.loggerError(context, err);
+    else console.error(`[ERROR] ${context}:`, err);
+}
+
+function fetchProfile() {
+    if (window.fetchProfile) return window.fetchProfile();
+    return Promise.resolve();
+}
+
+function fetchFacts() {
+    if (window.fetchFacts) return window.fetchFacts();
+    return Promise.resolve();
+}
+
+// ----------------------------------------------------
 // Event-Driven Voice Subsystem Architecture
 // ----------------------------------------------------
 
@@ -510,6 +543,14 @@ class VoiceSessionManager extends EventEmitter {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+    // Expose local functions to window for globally scoped helper routing
+    window.addLog = addLog;
+    window.setUIState = setUIState;
+    window.appendChatBubble = appendChatBubble;
+    window.loggerError = loggerError;
+    window.fetchProfile = fetchProfile;
+    window.fetchFacts = fetchFacts;
+
     // UI Elements
     const timeDisplay = document.getElementById("time-display");
     const arcCore = document.getElementById("arc-core");
@@ -570,6 +611,13 @@ document.addEventListener("DOMContentLoaded", () => {
     const ttsPipeline = new TTSPipeline(ttsAudio);
     const vadEngine = new VADEngine();
     const voiceSessionManager = new VoiceSessionManager(vadEngine, sttPipeline, llmPipeline, ttsPipeline);
+
+    // Attach to window for automated end-to-end integration testing and developer diagnostics
+    window.sttPipeline = sttPipeline;
+    window.llmPipeline = llmPipeline;
+    window.ttsPipeline = ttsPipeline;
+    window.vadEngine = vadEngine;
+    window.voiceSessionManager = voiceSessionManager;
 
     // Bind Voice HUD Config Panel Inputs
     const toggleContinuousVoice = document.getElementById("toggle-continuous-voice");

@@ -17,6 +17,8 @@ DATA_DIR.mkdir(exist_ok=True)
 
 # Configurations
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "gemini")
+LLM_MODEL = os.getenv("LLM_MODEL", "gemini-2.5-flash")
 
 CHROMA_DB_PATH = os.getenv("CHROMA_DB_PATH", str(DATA_DIR / "chroma"))
 

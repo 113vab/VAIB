@@ -57,11 +57,14 @@ The reasoning engine utilizes `gemini-2.5-flash` due to its high speed, tool-cal
 - **Speech-to-Text (`stt.py`)**: Runs local offline inference on recorded voice binaries using the `faster-whisper` library. Loads the optimized `tiny` model locally using CPU `int8` quantization. Features a browser-native Web Speech API fallback on the frontend as an alternative.
 - **Text-to-Speech (`tts.py`)**: Integrates Microsoft's free `edge-tts` engine. Generates high-fidelity audio streams matching natural human pitch (`en-GB-SoniaNeural` voice), saving them to a local cache directory served via FastAPI.
 
-### 2.4 Presentation Layer (`app/gui/`)
-The visual dashboard replicates a holographic HUD using HTML5, CSS3, and JavaScript:
-- **Web Audio Playback**: Audio bytes are decoded and played using standard HTML5 `<audio>` tags. This enables real-time interruption (muting) and waveform synchronization.
-- **Glassmorphism Styling**: Blends glass panels with cybernetic gradients (`#00f0ff` cyan, `#bd00ff` violet) and CSS3 keyframe animations (rotating HUD rings, pulsing glowing cores).
-- **Dual-Mode Voice Capturing**: Features a Hold-to-Talk button using `MediaRecorder` to capture micro-audio, with web-speech translation fallback.
+### 2.4 Presentation Layer & Voice Subsystem (`app/gui/static/js/main.js`)
+The visual dashboard replicates a holographic HUD and is driven by a decoupled, event-driven voice architecture:
+- **VoiceSessionManager**: Central controller that manages the voice assistant's state machine (Idle, Listening, Processing, Speaking) and coordinates the pipelines.
+- **VADEngine**: Monitors user microphone stream volume levels (RMS) in real-time, dynamically tracking the background noise floor to start/stop recording buffers automatically.
+- **Decoupled Pipelines**: Separate STT (transcription client), LLM (brain query processor), and TTS (vocal play/interruption controller) modules that signal via asynchronous events.
+- **Web Audio Playback**: Plays generated edge-tts MP3 audio cache segments, supporting immediate interruption (pause/mute) when the user begins speaking.
+- **Glassmorphism Styling**: cybernetic gradients, interactive HUD controls (Auto-Wake switch, sensitivity slider), and rotating reactor core states.
+- **Dual-Mode Voice Capturing**: Supports both continuous monitoring (Auto-Wake) and manual Hold-to-Talk overrides.
 
 ---
 
@@ -126,6 +129,8 @@ sequenceDiagram
 
 ## 4. Error Handling and Resiliency
 
--- **API Offline Mitigation**: If the Gemini API key is missing or internet connections are down, the agent fails gracefully, logging details to `vaib.log` and warning the user through the HUD diagnostics panel.
--- **Microphone Fallback**: If the browser mic access is denied or local transcription fails, the UI automatically initiates local browser-native Web Speech recognition (`webkitSpeechRecognition`) to prevent locking user inputs.
--- **Audio Overlap Interruption**: The frontend monitors voice outputs. If the user transmits a new text message or clicks the central core reactor while VAIB is speaking, the HTML5 media stream is paused instantly, and the core returns to standby status.
+- **API Offline Mitigation**: If the Gemini API key is missing or internet connections are down, the agent fails gracefully, logging details to `vaib.log` and warning the user through the HUD diagnostics panel.
+- **Microphone Fallback**: If the browser mic access is denied or local transcription fails, the UI automatically initiates local browser-native Web Speech recognition (`webkitSpeechRecognition`) to prevent locking user inputs.
+- **Audio Overlap Interruption**: The frontend monitors voice outputs. If the user transmits a new text message or clicks the central core reactor while VAIB is speaking, the HTML5 media stream is paused instantly, and the core returns to standby status.
+- **VAD Auto-Calibration & Noise Floor Recovery**: The VAD engine samples environment levels continuously, computing a moving noise floor base. If the environment becomes louder (e.g. fan noise turns on), the VAD dynamically offsets its threshold to avoid false-triggering, while still accepting user voice inputs.
+- **Vocal Interruption Recovery**: When user vocalization occurs during active output playback, `ttsPipeline.interrupt()` triggers immediately, closing current streams and resetting timers to return to active `listening` state. This prevents vocal echo feedbacks from creating response loops.

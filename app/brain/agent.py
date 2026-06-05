@@ -4,7 +4,7 @@ import logging
 from typing import List, Dict, Any, Optional, Union
 import google.generativeai as genai
 from google.generativeai.types import ContentDict, PartDict
-from app.config import logger, GEMINI_API_KEY
+from app.config import logger, GEMINI_API_KEY, LLM_PROVIDER, LLM_MODEL
 from app.brain.memory import MemoryManager
 from app.brain.context import ContextManager
 from app.brain.summarizer import ConversationSummarizer
@@ -62,7 +62,8 @@ class VaibAgent:
     def __init__(self, memory_manager: MemoryManager):
         self.memory = memory_manager
         self.api_key = GEMINI_API_KEY
-        self.model_name = "gemini-2.5-flash"
+        self.provider = LLM_PROVIDER.lower()
+        self.model_name = LLM_MODEL
         
         self.context_manager = ContextManager(self.memory)
         self.summarizer = ConversationSummarizer(self.memory)
@@ -112,23 +113,25 @@ class VaibAgent:
             if func not in self.tools_list:
                 self.tools_list.append(func)
 
-        if not self.api_key:
-            logger.warning("GEMINI_API_KEY is not set in environment or .env file. V.A.I.B. will operate in local Simulation Mode.")
-            self.model = None
-            return
+        self.model = None
+        if self.provider == "gemini":
+            if not self.api_key:
+                logger.warning("GEMINI_API_KEY is not set in environment or .env file. V.A.I.B. will operate in local Simulation Mode.")
+                return
+                
+            genai.configure(api_key=self.api_key)
             
-        genai.configure(api_key=self.api_key)
-        
-        try:
-            self.model = genai.GenerativeModel(
-                model_name=self.model_name,
-                system_instruction=SYSTEM_PROMPT,
-                tools=self.tools_list
-            )
-            logger.info(f"Gemini model '{self.model_name}' initialized successfully with tool calling.")
-        except Exception as e:
-            logger.error(f"Failed to initialize Gemini model: {e}")
-            self.model = None
+            try:
+                self.model = genai.GenerativeModel(
+                    model_name=self.model_name,
+                    system_instruction=SYSTEM_PROMPT,
+                    tools=self.tools_list
+                )
+                logger.info(f"Gemini model '{self.model_name}' initialized successfully with tool calling.")
+            except Exception as e:
+                logger.error(f"Failed to initialize Gemini model: {e}")
+        else:
+            logger.info(f"Multi-LLM Preparation: Selected provider '{self.provider}' with model '{self.model_name}'. Ready for expansion.")
 
     # Tools definition (must have docstrings and type annotations for Gemini to parse schemas)
     def save_user_preference(self, preference: str) -> str:
@@ -533,6 +536,17 @@ class VaibAgent:
     async def generate_response(self, user_input: str) -> str:
         """
         Processes user query, queries memory, runs tool calls, updates memory, and returns assistant text.
+        Dynamic routing for multi-LLM capability.
+        """
+        if self.provider == "gemini":
+            return await self._generate_gemini_response(user_input)
+        else:
+            logger.warning(f"LLM provider '{self.provider}' is prepared but not fully implemented. Falling back to simulation mode.")
+            return await self._generate_response_simulation(user_input)
+
+    async def _generate_gemini_response(self, user_input: str) -> str:
+        """
+        Processes user query specifically via Gemini API with tool calling support.
         """
         if not self.model:
             return await self._generate_response_simulation(user_input)
