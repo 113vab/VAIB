@@ -1,3 +1,11 @@
+⚠️ VAIB is proprietary software.
+
+This repository is provided for educational and portfolio review purposes only.
+
+Commercial use, redistribution, resale, or creation of derivative commercial products is prohibited without written permission from the author.
+
+
+
 # V.A.I.B. - Personal AI Assistant (Gemini Only Stack)
 
 V.A.I.B. (Virtual Artificial Intelligence Brain) is a voice-first personal AI assistant for Windows, inspired by Marvel's JARVIS. It is built with a FastAPI backend, a sleek holographic glassmorphic UI dashboard, ChromaDB for semantic long-term memory, and SQLite for chat log history.
@@ -108,3 +116,9 @@ Execute the automated test suite with pytest:
 pytest
 ```
 All tests run locally offline using mocked voice/brain pipelines.
+
+⚠️ VAIB is proprietary software.
+
+This repository is provided for educational and portfolio review purposes only.
+
+Commercial use, redistribution, resale, or creation of derivative commercial products is prohibited without written permission from the author.
