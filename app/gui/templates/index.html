@@ -209,6 +209,32 @@
                         <span class="btn-label">PURGE MEMORY</span>
                     </button>
                 </div>
+
+                <!-- Voice Assistant HUD & Controls -->
+                <div class="voice-hud-panel glass-panel" style="margin-top: 15px; display: flex; flex-direction: column; gap: 10px; width: 100%; max-width: 320px; align-self: center; padding: 15px; box-sizing: border-box;">
+                    <div class="panel-header" style="display: flex; justify-content: space-between; align-items: center; padding-bottom: 5px; border-bottom: 1px solid rgba(0, 240, 255, 0.2); margin-bottom: 5px;">
+                        <span class="panel-title" style="font-size: 0.8rem; font-family: 'Orbitron', sans-serif; color: var(--neon-cyan); letter-spacing: 1px;">VOICE CONFIG</span>
+                        <span class="panel-tag" style="font-size: 0.65rem; font-family: 'Share Tech Mono', monospace; color: #808080;">// VOICE.CFG</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 5px 0;">
+                        <span style="font-family: 'Share Tech Mono', monospace; font-size: 0.85rem; color: #00f0ff;">CONTINUOUS VOICE (AUTO-WAKE)</span>
+                        <label class="switch">
+                            <input type="checkbox" id="toggle-continuous-voice">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    <div style="display: flex; flex-direction: column; gap: 4px; padding: 5px 0;">
+                        <div style="display: flex; justify-content: space-between; font-family: 'Share Tech Mono', monospace; font-size: 0.75rem; color: #c0c0c0;">
+                            <span>MIC VAD THRESHOLD</span>
+                            <span id="label-vad-threshold">20%</span>
+                        </div>
+                        <input type="range" id="slider-mic-threshold" min="5" max="95" value="20" style="width: 100%; cursor: pointer;">
+                    </div>
+                    <div style="display: flex; justify-content: space-between; align-items: center; font-family: 'Share Tech Mono', monospace; font-size: 0.75rem; border-top: 1px solid rgba(0, 240, 255, 0.1); padding-top: 8px; margin-top: 5px;">
+                        <span style="color: #c0c0c0;">VOICE STATE:</span>
+                        <span id="voice-hud-state" style="color: #00f0ff; font-weight: bold; text-transform: uppercase; font-family: 'Orbitron', sans-serif; letter-spacing: 1px;">IDLE</span>
+                    </div>
+                </div>
             </section>
 
             <!-- Right Side: Cognitive Chat Interface -->

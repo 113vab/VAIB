@@ -1,5 +1,514 @@
 // V.A.I.B. Core HUD JavaScript Logic
 
+// ----------------------------------------------------
+// Event-Driven Voice Subsystem Architecture
+// ----------------------------------------------------
+
+class EventEmitter {
+    constructor() {
+        this.listeners = {};
+    }
+    on(event, fn) {
+        if (!this.listeners[event]) {
+            this.listeners[event] = [];
+        }
+        this.listeners[event].push(fn);
+    }
+    off(event, fn) {
+        if (!this.listeners[event]) return;
+        this.listeners[event] = this.listeners[event].filter(f => f !== fn);
+    }
+    emit(event, data) {
+        if (this.listeners[event]) {
+            this.listeners[event].forEach(fn => {
+                try {
+                    fn(data);
+                } catch (err) {
+                    console.error(`Error in event listener for ${event}:`, err);
+                }
+            });
+        }
+    }
+}
+
+class VADEngine extends EventEmitter {
+    constructor() {
+        super();
+        this.audioContext = null;
+        this.analyser = null;
+        this.micStream = null;
+        this.scriptProcessor = null;
+        
+        // VAD Tuning Parameters
+        this.sensitivity = 0.02; 
+        this.noiseFloor = 0.005;
+        this.history = [];
+        this.historySize = 60; // ~3 seconds window
+        
+        // State variables
+        this.isSpeaking = false;
+        this.speechTriggerFrames = 2;   // ~90ms of consecutive speech
+        this.silenceTriggerFrames = 25;  // ~1.1s of consecutive silence
+        this.consecutiveSpeechFrames = 0;
+        this.consecutiveSilenceFrames = 0;
+        
+        // Recorder
+        this.mediaRecorder = null;
+        this.audioChunks = [];
+        this.isRecording = false;
+    }
+    
+    setSensitivity(value) {
+        // Map slider value (5-95) to VAD threshold offset (lower is more sensitive)
+        this.sensitivity = 0.001 + ((100 - value) / 100) * 0.05;
+    }
+    
+    async start(stream) {
+        this.micStream = stream;
+        this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        await this.audioContext.resume();
+        
+        const source = this.audioContext.createMediaStreamSource(stream);
+        this.analyser = this.audioContext.createAnalyser();
+        this.analyser.fftSize = 512;
+        source.connect(this.analyser);
+        
+        this.scriptProcessor = this.audioContext.createScriptProcessor(2048, 1, 1);
+        source.connect(this.scriptProcessor);
+        this.scriptProcessor.connect(this.audioContext.destination);
+        
+        const bufferLength = this.analyser.frequencyBinCount;
+        const dataArray = new Float32Array(bufferLength);
+        
+        this.scriptProcessor.onaudioprocess = () => {
+            if (!this.micStream) return;
+            
+            this.analyser.getFloatTimeDomainData(dataArray);
+            
+            // Calculate RMS (Root Mean Square) energy
+            let sum = 0;
+            for (let i = 0; i < bufferLength; i++) {
+                sum += dataArray[i] * dataArray[i];
+            }
+            const rms = Math.sqrt(sum / bufferLength);
+            
+            // Slide noise floor estimation
+            this.history.push(rms);
+            if (this.history.length > this.historySize) {
+                this.history.shift();
+            }
+            
+            const sorted = [...this.history].sort((a,b) => a - b);
+            this.noiseFloor = sorted[Math.floor(sorted.length * 0.1)] || 0.005;
+            
+            const threshold = this.noiseFloor + this.sensitivity;
+            this.emit("volume", { rms, threshold });
+            
+            if (rms > threshold) {
+                this.consecutiveSilenceFrames = 0;
+                this.consecutiveSpeechFrames++;
+                
+                if (this.consecutiveSpeechFrames >= this.speechTriggerFrames) {
+                    if (!this.isSpeaking) {
+                        this.isSpeaking = true;
+                        this.emit("speech.start");
+                        this.startRecording();
+                    }
+                }
+            } else {
+                this.consecutiveSpeechFrames = 0;
+                this.consecutiveSilenceFrames++;
+                
+                if (this.consecutiveSilenceFrames >= this.silenceTriggerFrames) {
+                    if (this.isSpeaking) {
+                        this.isSpeaking = false;
+                        this.emit("speech.end");
+                        this.stopRecording();
+                    }
+                }
+            }
+        };
+    }
+    
+    stop() {
+        if (this.scriptProcessor) {
+            this.scriptProcessor.disconnect();
+            this.scriptProcessor = null;
+        }
+        if (this.audioContext) {
+            this.audioContext.close().catch(() => {});
+            this.audioContext = null;
+        }
+        if (this.micStream) {
+            this.micStream.getTracks().forEach(track => track.stop());
+            this.micStream = null;
+        }
+        this.isSpeaking = false;
+        this.consecutiveSpeechFrames = 0;
+        this.consecutiveSilenceFrames = 0;
+        this.history = [];
+        if (this.isRecording) {
+            this.stopRecording();
+        }
+    }
+    
+    startRecording() {
+        if (!this.micStream) return;
+        this.audioChunks = [];
+        
+        let options = {};
+        if (typeof MediaRecorder.isTypeSupported === 'function') {
+            if (MediaRecorder.isTypeSupported('audio/webm')) {
+                options = { mimeType: 'audio/webm' };
+            } else if (MediaRecorder.isTypeSupported('audio/ogg')) {
+                options = { mimeType: 'audio/ogg' };
+            }
+        }
+        
+        try {
+            this.mediaRecorder = new MediaRecorder(this.micStream, options);
+            this.mediaRecorder.ondataavailable = (event) => {
+                if (event.data && event.data.size > 0) {
+                    this.audioChunks.push(event.data);
+                }
+            };
+            this.mediaRecorder.start();
+            this.isRecording = true;
+        } catch (e) {
+            console.error("VADRecorder error starting:", e);
+        }
+    }
+    
+    stopRecording() {
+        if (!this.isRecording || !this.mediaRecorder) return;
+        
+        this.mediaRecorder.onstop = () => {
+            const mimeType = this.mediaRecorder.mimeType || 'audio/webm';
+            const audioBlob = new Blob(this.audioChunks, { type: mimeType });
+            this.emit("audio.ready", audioBlob);
+        };
+        
+        try {
+            this.mediaRecorder.stop();
+        } catch (e) {
+            console.error("VADRecorder error stopping:", e);
+        }
+        this.isRecording = false;
+    }
+}
+
+class STTPipeline extends EventEmitter {
+    async transcribe(audioBlob) {
+        this.emit("start");
+        const formData = new FormData();
+        formData.append("file", audioBlob, "user_voice.webm");
+        
+        try {
+            const res = await fetch("/api/stt", {
+                method: "POST",
+                body: formData
+            });
+            
+            if (!res.ok) {
+                const errData = await res.json();
+                throw new Error(errData.detail || "Transcription error");
+            }
+            
+            const data = await res.json();
+            const text = data.text || "";
+            this.emit("complete", text);
+            return text;
+        } catch (e) {
+            this.emit("error", e);
+            throw e;
+        }
+    }
+}
+
+class LLMPipeline extends EventEmitter {
+    async process(message) {
+        this.emit("start", message);
+        appendChatBubble("user", message);
+        addLog(`[INPUT] User input received: "${message}"`);
+        
+        try {
+            const res = await fetch("/api/chat", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ message: message })
+            });
+            
+            if (!res.ok) {
+                const errData = await res.json();
+                throw new Error(errData.detail || "Chat failed");
+            }
+            
+            const data = await res.json();
+            const reply = data.response || "";
+            appendChatBubble("assistant", reply);
+            addLog(`[BRAIN] Response synthesized successfully.`);
+            
+            // Reload cognitive memory panels dynamically
+            if (typeof fetchProfile === 'function') await fetchProfile();
+            if (typeof fetchFacts === 'function') await fetchFacts();
+            
+            this.emit("complete", reply);
+            return reply;
+        } catch (e) {
+            this.emit("error", e);
+            appendChatBubble("assistant", "I had trouble computing that request, Sir. Please check my connections.");
+            throw e;
+        }
+    }
+}
+
+class TTSPipeline extends EventEmitter {
+    constructor(audioElement) {
+        super();
+        this.audio = audioElement;
+        this.setupAudioListeners();
+    }
+    
+    setupAudioListeners() {
+        this.audio.onplay = () => {
+            this.emit("play.start");
+            addLog("[SPEECH] Speaking response...");
+        };
+        this.audio.onended = () => {
+            this.emit("play.end");
+            addLog("[SPEECH] Speech transmission completed.", "system");
+        };
+        this.audio.onerror = (e) => {
+            this.emit("error", e);
+        };
+    }
+    
+    async speak(text) {
+        this.emit("start", text);
+        try {
+            const res = await fetch("/api/tts", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ text: text })
+            });
+            
+            if (!res.ok) throw new Error("TTS API error");
+            
+            const data = await res.json();
+            this.audio.src = data.audio_url;
+            await this.audio.play();
+        } catch (e) {
+            this.emit("error", e);
+            console.error("TTS failed:", e);
+        }
+    }
+    
+    interrupt() {
+        if (!this.audio.paused) {
+            this.audio.pause();
+            this.emit("interrupted");
+            addLog("[SYSTEM] Speech playback interrupted by user.", "system");
+        }
+    }
+}
+
+class VoiceSessionManager extends EventEmitter {
+    constructor(vadEngine, sttPipeline, llmPipeline, ttsPipeline) {
+        super();
+        this.vad = vadEngine;
+        this.stt = sttPipeline;
+        this.llm = llmPipeline;
+        this.tts = ttsPipeline;
+        
+        this.mode = "manual"; 
+        this.state = "idle";  
+        this.inactivityTimer = null;
+        this.inactivityLimit = 30000; // 30 seconds
+        
+        // Static sound assets
+        this.wakeAudio = new Audio("/static/sounds/wake.mp3");
+        this.sleepAudio = new Audio("/static/sounds/sleep.mp3");
+        
+        this.setupEventListeners();
+    }
+    
+    setMode(mode) {
+        this.mode = mode;
+        this.resetInactivityTimer();
+        
+        if (mode === "auto-wake") {
+            this.state = "idle";
+            this.updateHUDState("idle");
+            this.startMicStream();
+        } else {
+            this.state = "idle";
+            this.updateHUDState("idle");
+            this.stopMicStream();
+        }
+    }
+    
+    async startMicStream() {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ 
+                audio: { 
+                    echoCancellation: true, 
+                    noiseSuppression: true 
+                } 
+            });
+            await this.vad.start(stream);
+            addLog("[SYSTEM] Continuous voice monitoring initialized.", "system");
+        } catch (err) {
+            console.error("VAD mic start failed:", err);
+            addLog("[ERROR] Failed to start continuous voice monitoring.", "error");
+            const toggle = document.getElementById("toggle-continuous-voice");
+            if (toggle) toggle.checked = false;
+            this.setMode("manual");
+        }
+    }
+    
+    stopMicStream() {
+        this.vad.stop();
+        addLog("[SYSTEM] Continuous voice monitoring deactivated.", "system");
+    }
+    
+    setupEventListeners() {
+        this.vad.on("speech.start", () => {
+            this.resetInactivityTimer();
+            if (this.state === "speaking") {
+                this.tts.interrupt();
+                addLog("[SYSTEM] Vocal interruption detected.", "system");
+                this.state = "listening";
+                this.updateHUDState("listening");
+            } else if (this.state === "idle" || this.state === "listening") {
+                this.state = "listening";
+                this.updateHUDState("listening");
+            }
+        });
+        
+        this.vad.on("audio.ready", async (audioBlob) => {
+            if (this.state === "listening") {
+                this.state = "processing";
+                this.updateHUDState("processing");
+                
+                try {
+                    const text = await this.stt.transcribe(audioBlob);
+                    this.emit("stt.complete", text);
+                } catch (e) {
+                    addLog(`[ERROR] STT failed: ${e.message || e}`, "error");
+                    this.returnToListeningOrIdle();
+                }
+            } else if (this.state === "idle") {
+                try {
+                    const text = await this.stt.transcribe(audioBlob);
+                    if (text.trim()) {
+                        const wakeMatch = text.match(/\b(hey\s+vaib|vaib)\b/i);
+                        if (wakeMatch) {
+                            addLog("[WAKE] Wake word detected!", "positive");
+                            
+                            try {
+                                await this.wakeAudio.play();
+                            } catch (e) { console.error("Wake sound failed:", e); }
+                            
+                            this.state = "listening";
+                            this.updateHUDState("listening");
+                            
+                            const matchIndex = wakeMatch.index;
+                            const matchLength = wakeMatch[0].length;
+                            const commandText = text.substring(matchIndex + matchLength).trim().replace(/^[,\s]+|[.!?\s]+$/g, "");
+                            
+                            if (commandText) {
+                                addLog(`[WAKE] Command detected: "${commandText}"`);
+                                this.processCommand(commandText);
+                            } else {
+                                this.resetInactivityTimer();
+                            }
+                        } else {
+                            this.returnToListeningOrIdle();
+                        }
+                    } else {
+                        this.returnToListeningOrIdle();
+                    }
+                } catch (e) {
+                    this.returnToListeningOrIdle();
+                }
+            }
+        });
+        
+        this.tts.on("play.end", () => {
+            this.returnToListeningOrIdle();
+        });
+        
+        this.tts.on("play.start", () => {
+            this.state = "speaking";
+            this.updateHUDState("speaking");
+        });
+        
+        this.on("stt.complete", (text) => {
+            if (!text.trim()) {
+                this.returnToListeningOrIdle();
+                return;
+            }
+            this.processCommand(text);
+        });
+    }
+    
+    async processCommand(text) {
+        this.state = "processing";
+        this.updateHUDState("processing");
+        try {
+            const reply = await this.llm.process(text);
+            this.state = "speaking";
+            this.updateHUDState("speaking");
+            await this.tts.speak(reply);
+        } catch (e) {
+            this.returnToListeningOrIdle();
+        }
+    }
+    
+    returnToListeningOrIdle() {
+        if (this.mode === "auto-wake") {
+            this.state = "listening";
+            this.updateHUDState("listening");
+            this.resetInactivityTimer();
+        } else {
+            this.state = "idle";
+            this.updateHUDState("idle");
+        }
+    }
+    
+    resetInactivityTimer() {
+        clearTimeout(this.inactivityTimer);
+        if (this.mode === "auto-wake" && this.state !== "processing" && this.state !== "speaking") {
+            this.inactivityTimer = setTimeout(async () => {
+                this.state = "idle";
+                this.updateHUDState("idle");
+                addLog("[SYSTEM] Inactivity timeout. Returning to wake-word standby.", "system");
+                try {
+                    await this.sleepAudio.play();
+                } catch (e) { console.error("Sleep sound failed:", e); }
+            }, this.inactivityLimit);
+        }
+    }
+    
+    updateHUDState(state) {
+        const hudStateSpan = document.getElementById("voice-hud-state");
+        if (hudStateSpan) {
+            hudStateSpan.textContent = state.toUpperCase();
+            if (state === "idle") hudStateSpan.style.color = "#00f0ff";
+            else if (state === "listening") hudStateSpan.style.color = "#00f0ff";
+            else if (state === "processing") hudStateSpan.style.color = "#a000ff";
+            else if (state === "speaking") hudStateSpan.style.color = "#00f0ff";
+        }
+        
+        if (typeof setUIState === 'function') {
+            if (state === "idle") setUIState("standby", "STANDBY // ACTIVE");
+            else if (state === "listening") setUIState("listening", "LISTENING (AUTO-WAKE)");
+            else if (state === "processing") setUIState("thinking", "PROCESSING PATHWAYS");
+            else if (state === "speaking") setUIState("speaking", "TRANSMITTING SPEECH");
+        }
+    }
+}
+
 document.addEventListener("DOMContentLoaded", () => {
     // UI Elements
     const timeDisplay = document.getElementById("time-display");
@@ -54,6 +563,40 @@ document.addEventListener("DOMContentLoaded", () => {
     // Browser Web Speech recognition fallback
     let webSpeechRecognizer = null;
     let webSpeechActive = false;
+
+    // Instantiate Decoupled Voice Subsystem Components
+    const sttPipeline = new STTPipeline();
+    const llmPipeline = new LLMPipeline();
+    const ttsPipeline = new TTSPipeline(ttsAudio);
+    const vadEngine = new VADEngine();
+    const voiceSessionManager = new VoiceSessionManager(vadEngine, sttPipeline, llmPipeline, ttsPipeline);
+
+    // Bind Voice HUD Config Panel Inputs
+    const toggleContinuousVoice = document.getElementById("toggle-continuous-voice");
+    const sliderMicThreshold = document.getElementById("slider-mic-threshold");
+    const labelVadThreshold = document.getElementById("label-vad-threshold");
+
+    if (toggleContinuousVoice) {
+        toggleContinuousVoice.addEventListener("change", (e) => {
+            if (e.target.checked) {
+                voiceSessionManager.setMode("auto-wake");
+            } else {
+                voiceSessionManager.setMode("manual");
+            }
+        });
+    }
+
+    if (sliderMicThreshold) {
+        sliderMicThreshold.addEventListener("input", (e) => {
+            const val = e.target.value;
+            if (labelVadThreshold) {
+                labelVadThreshold.textContent = `${val}%`;
+            }
+            vadEngine.setSensitivity(val);
+        });
+        // Set initial sensitivity based on default value
+        vadEngine.setSensitivity(sliderMicThreshold.value);
+    }
 
     // Initialize HUD Systems
     startClock();
@@ -239,7 +782,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // Interrupt TTS playback if user clicks the core
     arcCore.addEventListener("click", () => {
-        if (!ttsAudio.paused) {
+        if (typeof ttsPipeline !== 'undefined') {
+            ttsPipeline.interrupt();
+        } else if (!ttsAudio.paused) {
             ttsAudio.pause();
             addLog("[SYSTEM] Speech playback interrupted by user.", "system");
             setUIState("standby");
@@ -250,37 +795,7 @@ document.addEventListener("DOMContentLoaded", () => {
     // TTS Audio Playback
     // ----------------------------------------------------
     async function playTTS(text) {
-        try {
-            setUIState("thinking", "SYNTHESIZING VOCALS");
-            
-            const res = await fetch("/api/tts", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ text: text })
-            });
-
-            if (!res.ok) throw new Error("TTS API error");
-
-            const data = await res.json();
-            
-            // Play generated file
-            ttsAudio.src = data.audio_url;
-            
-            ttsAudio.onplay = () => {
-                setUIState("speaking", "TRANSMITTING SPEECH");
-                addLog("[SPEECH] Speaking response...");
-            };
-
-            ttsAudio.onended = () => {
-                setUIState("standby");
-                addLog("[SPEECH] Speech transmission completed.", "system");
-            };
-
-            await ttsAudio.play();
-        } catch (err) {
-            loggerError("Speech synthesis failed", err);
-            setUIState("standby");
-        }
+        await ttsPipeline.speak(text);
     }
 
     // Helper logger
@@ -318,39 +833,13 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     async function handleUserMessage(message) {
-        // Interrupt current audio if running
-        if (!ttsAudio.paused) {
-            ttsAudio.pause();
-        }
-
-        appendChatBubble("user", message);
+        ttsPipeline.interrupt();
         setUIState("thinking", "COMPUTING MATRIX");
-        addLog(`[INPUT] User input received: "${message}"`);
-
         try {
-            const chatRes = await fetch("/api/chat", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ message: message })
-            });
-
-            if (!chatRes.ok) throw new Error("Chat response failed");
-
-            const chatData = await chatRes.json();
-            const assistantResponse = chatData.response;
-            
-            appendChatBubble("assistant", assistantResponse);
-            addLog(`[BRAIN] Generated response.`);
-
-            // Trigger TTS speech
-            await playTTS(assistantResponse);
-
-            // Reload cognitive memory panels dynamically
-            await fetchProfile();
-            await fetchFacts();
+            const reply = await llmPipeline.process(message);
+            setUIState("speaking", "TRANSMITTING SPEECH");
+            await ttsPipeline.speak(reply);
         } catch (err) {
-            loggerError("Brain processing failed", err);
-            appendChatBubble("assistant", "I had trouble computing that request, Sir. Please check my connections.");
             setUIState("standby");
         }
     }
@@ -378,13 +867,21 @@ document.addEventListener("DOMContentLoaded", () => {
             }
             return;
         }
+        
+        // Pause continuous voice monitor if active during manual push-to-talk override
+        if (typeof voiceSessionManager !== 'undefined' && voiceSessionManager.mode === "auto-wake") {
+            voiceSessionManager.stopMicStream();
+        }
+
         wantsToRecord = true;
         isToggled = false;
         recordingStartTime = Date.now();
         audioChunks = [];
         
         // Interrupt any playing speech
-        if (!ttsAudio.paused) {
+        if (typeof ttsPipeline !== 'undefined') {
+            ttsPipeline.interrupt();
+        } else if (!ttsAudio.paused) {
             ttsAudio.pause();
         }
 
@@ -394,6 +891,9 @@ document.addEventListener("DOMContentLoaded", () => {
             // Abort if the user released the button before permission was granted
             if (!wantsToRecord) {
                 stream.getTracks().forEach(track => track.stop());
+                if (typeof voiceSessionManager !== 'undefined' && voiceSessionManager.mode === "auto-wake") {
+                    voiceSessionManager.startMicStream();
+                }
                 return;
             }
 
@@ -425,6 +925,9 @@ document.addEventListener("DOMContentLoaded", () => {
                 if (audioChunks.length === 0 || audioBlob.size === 0) {
                     addLog("[AUDIO] No audio data captured.", "warning");
                     setUIState("standby");
+                    if (typeof voiceSessionManager !== 'undefined' && voiceSessionManager.mode === "auto-wake") {
+                        voiceSessionManager.returnToListeningOrIdle();
+                    }
                     return;
                 }
 
@@ -445,6 +948,9 @@ document.addEventListener("DOMContentLoaded", () => {
                             await handleUserMessage(text);
                         } else {
                             setUIState("standby", "NO AUDIO DETECTED");
+                            if (typeof voiceSessionManager !== 'undefined' && voiceSessionManager.mode === "auto-wake") {
+                                voiceSessionManager.returnToListeningOrIdle();
+                            }
                         }
                     } else {
                         const errData = await sttRes.json();
@@ -458,6 +964,9 @@ document.addEventListener("DOMContentLoaded", () => {
                 } catch (err) {
                     loggerError("Transcription process failed", err);
                     setUIState("standby");
+                    if (typeof voiceSessionManager !== 'undefined' && voiceSessionManager.mode === "auto-wake") {
+                        voiceSessionManager.returnToListeningOrIdle();
+                    }
                 }
             };
 
