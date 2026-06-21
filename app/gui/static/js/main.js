@@ -637,9 +637,6 @@ class TTSPipeline extends EventEmitter {
     
     setupAudioListeners() {
         this.audio.onplay = () => {
-            this.emit("play.start");
-            addLog(`[SPEECH] Speaking response: "${this.currentPlayingText}"`);
-            
             if (this.isFirstSentence && this.startTime) {
                 const firstSentenceSpokenLatency = Date.now() - this.startTime;
                 window.lastFirstSentenceLatency = firstSentenceSpokenLatency;
@@ -648,7 +645,14 @@ class TTSPipeline extends EventEmitter {
                 addLog(`[LATENCY] First sentence spoken: ${firstSentenceSpokenLatency}ms`, "info");
                 addLog(`[TIMING] First audio playback started: +${firstSentenceSpokenLatency}ms ("${this.currentPlayingText}")`, "info");
                 this.isFirstSentence = false;
+                
+                if (window.interruptionMetrics) {
+                    window.interruptionMetrics.firstTokenLatency = window.lastFirstTokenLatency;
+                    window.interruptionMetrics.firstSpokenSentenceLatency = firstSentenceSpokenLatency;
+                }
             }
+            this.emit("play.start");
+            addLog(`[SPEECH] Speaking response: "${this.currentPlayingText}"`);
         };
         
         this.audio.onended = () => {
@@ -1179,10 +1183,8 @@ class VoiceSessionManager extends EventEmitter {
     
     async processCommand(text) {
         if (this.interruptedAndListening) {
-            addLog(`[PHASE 5E-C] Transcribed text captured: "${text}". LLM invocation suppressed.`, "info");
+            addLog(`[PHASE 5E-D] Transcribed user interruption query: "${text}". Processing...`, "info");
             this.interruptedAndListening = false;
-            this.returnToListeningOrIdle();
-            return;
         }
         this.state = "processing";
         this.updateHUDState("processing");
