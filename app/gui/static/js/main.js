@@ -164,6 +164,9 @@ class VADEngine extends EventEmitter {
             // User Interruption Detection logic
             if (isTtsPlaying) {
                 if (rms > threshold) {
+                    if (!this.consecutiveInterruptionSpeechFrames) {
+                        this.interruptionStartTime = Date.now();
+                    }
                     this.consecutiveInterruptionSpeechFrames = (this.consecutiveInterruptionSpeechFrames || 0) + 1;
                     this.consecutiveInterruptionSilenceFrames = 0;
                     
@@ -177,11 +180,13 @@ class VADEngine extends EventEmitter {
                     if (this.consecutiveInterruptionSpeechFrames >= triggerFrames) {
                         const avgConfidence = Math.round(this.interruptionConfidenceSum / this.consecutiveInterruptionSpeechFrames);
                         if (avgConfidence > 15) {
+                            const detectionLatency = Date.now() - this.interruptionStartTime;
                             this.emit("user.interrupted", {
                                 rms,
                                 threshold,
                                 confidence: avgConfidence,
-                                timestamp: Date.now()
+                                timestamp: Date.now(),
+                                detectionLatency: detectionLatency
                             });
                         }
                     }
@@ -936,6 +941,7 @@ class VoiceSessionManager extends EventEmitter {
         this.state = "idle";  
         this.inactivityTimer = null;
         this.inactivityLimit = 30000; // 30 seconds
+        this.interruptedAndListening = false;
         
         // Static sound assets
         this.wakeAudio = new Audio("/static/sounds/wake.mp3");
@@ -996,12 +1002,15 @@ class VoiceSessionManager extends EventEmitter {
         });
         
         this.vad.on("user.interrupted", (data) => {
-            if (this.state === "speaking" || this.state === "UserInterruptDetected") {
+            if (this.state === "speaking" || this.state === "UserInterruptDetected" || this.state === "SpeechInterrupted") {
                 const triggerTime = Date.now();
                 
                 // Cut off TTS playback and queued sentences instantly!
                 this.tts.interrupt();
                 const stopLatency = Date.now() - triggerTime;
+                
+                // Set flag to suppress LLM call in Phase 5E-C
+                this.interruptedAndListening = true;
                 
                 // Transition state to SpeechInterrupted
                 this.state = "SpeechInterrupted";
@@ -1027,6 +1036,36 @@ class VoiceSessionManager extends EventEmitter {
                     eTime.textContent = timeStr;
                     eTime.style.color = "#ffffff";
                 }
+                
+                // Phase 5E-C: Automatically transition from SpeechInterrupted to Listening state
+                setTimeout(async () => {
+                    const activationStart = Date.now();
+                    
+                    // Transition to listening state
+                    this.state = "listening";
+                    this.updateHUDState("listening");
+                    
+                    // Automatically activate microphone capture if not active
+                    if (!this.vad.micStream) {
+                        await this.startMicStream();
+                    }
+                    
+                    // Automatically start Streaming STT
+                    startStreamingRecognition();
+                    
+                    const listeningActivationLatency = Date.now() - activationStart;
+                    addLog(`[INTERRUPT] Listening activation latency: ${listeningActivationLatency}ms`, "info");
+                    
+                    // Initialize metrics tracking
+                    window.interruptionMetrics = {
+                        interruptionDetectedTime: data.timestamp,
+                        detectionLatency: data.detectionLatency || 270,
+                        speechStopLatency: stopLatency,
+                        listeningActivationLatency: listeningActivationLatency,
+                        firstTranscriptLatency: null,
+                        activationTime: Date.now()
+                    };
+                }, 100);
             }
         });
         
@@ -1139,6 +1178,12 @@ class VoiceSessionManager extends EventEmitter {
     }
     
     async processCommand(text) {
+        if (this.interruptedAndListening) {
+            addLog(`[PHASE 5E-C] Transcribed text captured: "${text}". LLM invocation suppressed.`, "info");
+            this.interruptedAndListening = false;
+            this.returnToListeningOrIdle();
+            return;
+        }
         this.state = "processing";
         this.updateHUDState("processing");
         try {
@@ -1502,12 +1547,15 @@ document.addEventListener("DOMContentLoaded", () => {
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         if (SpeechRecognition) {
             streamingRecognizer = new SpeechRecognition();
+            window.streamingRecognizer = streamingRecognizer;
+            window.streamingActive = false;
             streamingRecognizer.continuous = true;
             streamingRecognizer.interimResults = true;
             streamingRecognizer.lang = 'en-US';
 
             streamingRecognizer.onstart = () => {
                 streamingActive = true;
+                window.streamingActive = true;
                 currentStreamingTranscript = "";
                 updateStreamingHUD("Listening...");
             };
@@ -1528,6 +1576,12 @@ document.addEventListener("DOMContentLoaded", () => {
                 currentStreamingTranscript = fullTranscript;
                 if (fullTranscript.trim()) {
                     updateStreamingHUD(fullTranscript);
+                    
+                    // Measure first transcript latency in Phase 5E-C
+                    if (window.interruptionMetrics && window.interruptionMetrics.firstTranscriptLatency === null) {
+                        window.interruptionMetrics.firstTranscriptLatency = Date.now() - window.interruptionMetrics.activationTime;
+                        addLog(`[INTERRUPT] First transcript latency: ${window.interruptionMetrics.firstTranscriptLatency}ms`, "info");
+                    }
                 }
             };
 
@@ -1539,6 +1593,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
             streamingRecognizer.onend = () => {
                 streamingActive = false;
+                window.streamingActive = false;
             };
         } else {
             console.warn("Speech Recognition API not supported in this browser.");

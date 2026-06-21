@@ -116,7 +116,7 @@ def run_verification():
             status_text = page.locator("#interruption-status").inner_text()
             print(f"State after interruption event: '{state_after_interrupt}', HUD status: '{status_text}'")
             
-            if state_after_interrupt == "SpeechInterrupted" and status_text == "CUTOFF":
+            if state_after_interrupt == "listening" and status_text == "CUTOFF":
                 tests_passed += 1
                 report.append("Interruption Detection: PASSED")
             else:
