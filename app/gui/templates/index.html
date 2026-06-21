@@ -68,6 +68,18 @@
                             <span class="diag-label">ACTIVE MODULES</span>
                             <span class="diag-val positive" id="diag-modules">PHASE 1 CORE</span>
                         </div>
+                        <div class="diag-item">
+                            <span class="diag-label">FIRST TOKEN</span>
+                            <span class="diag-val cyan-text" id="diag-latency-token">-- ms</span>
+                        </div>
+                        <div class="diag-item">
+                            <span class="diag-label">FIRST SENTENCE SPOKEN</span>
+                            <span class="diag-val cyan-text" id="diag-latency-sentence">-- ms</span>
+                        </div>
+                        <div class="diag-item">
+                            <span class="diag-label">TOTAL RESPONSE</span>
+                            <span class="diag-val cyan-text" id="diag-latency-total">-- ms</span>
+                        </div>
                     </div>
                 </div>
 
@@ -229,6 +241,14 @@
                             <span id="label-vad-threshold">20%</span>
                         </div>
                         <input type="range" id="slider-mic-threshold" min="5" max="95" value="20" style="width: 100%; cursor: pointer;">
+                    </div>
+                    <div style="display: flex; flex-direction: column; gap: 4px; padding: 5px 0; border-top: 1px solid rgba(0, 240, 255, 0.1); padding-top: 8px;">
+                        <span style="font-family: 'Share Tech Mono', monospace; font-size: 0.75rem; color: #c0c0c0;">VOICE PROFILE</span>
+                        <select id="select-voice-profile" style="background: rgba(0, 0, 0, 0.4); color: #00f0ff; border: 1px solid rgba(0, 240, 255, 0.3); padding: 5px; font-family: 'Share Tech Mono', monospace; border-radius: 3px; font-size: 0.8rem; cursor: pointer; outline: none; width: 100%;">
+                            <option value="Friday" style="background: #111; color: #00f0ff;">Friday (JennyNeural)</option>
+                            <option value="Aria" style="background: #111; color: #00f0ff;">Aria (AriaNeural)</option>
+                            <option value="Neerja" style="background: #111; color: #00f0ff;">Neerja (NeerjaNeural)</option>
+                        </select>
                     </div>
                     <div style="display: flex; flex-direction: column; gap: 4px; border-top: 1px solid rgba(0, 240, 255, 0.1); padding-top: 8px; margin-top: 5px;">
                         <span style="font-family: 'Share Tech Mono', monospace; font-size: 0.75rem; color: #808080; text-transform: uppercase;">Streaming Transcript</span>

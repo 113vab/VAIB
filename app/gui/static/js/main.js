@@ -33,6 +33,25 @@ function fetchFacts() {
     return Promise.resolve();
 }
 
+function updateStreamingHUD(text) {
+    if (window.updateStreamingHUD) window.updateStreamingHUD(text);
+    else {
+        const hud = document.getElementById("streaming-transcript-hud");
+        if (hud) {
+            hud.textContent = text;
+            hud.scrollTop = hud.scrollHeight;
+        }
+    }
+}
+
+function startStreamingRecognition() {
+    if (window.startStreamingRecognition) window.startStreamingRecognition();
+}
+
+function stopStreamingRecognition() {
+    if (window.stopStreamingRecognition) window.stopStreamingRecognition();
+}
+
 // ----------------------------------------------------
 // Event-Driven Voice Subsystem Architecture
 // ----------------------------------------------------
@@ -234,6 +253,10 @@ class VADEngine extends EventEmitter {
 
 class STTPipeline extends EventEmitter {
     async transcribe(audioBlob) {
+        if (!audioBlob || audioBlob.size < 500) {
+            addLog(`[AUDIO] Discarding empty/metadata-only VAD capture (${audioBlob ? audioBlob.size : 0} bytes).`, "warning");
+            return "";
+        }
         this.emit("start");
         const formData = new FormData();
         formData.append("file", audioBlob, "user_voice.webm");
@@ -260,28 +283,194 @@ class STTPipeline extends EventEmitter {
     }
 }
 
+function getNextSentence(buffer, isLastChunk) {
+    const regex = /[.?!]|\n/g;
+    let match;
+    while ((match = regex.exec(buffer)) !== null) {
+        const index = match.index;
+        const char = match[0];
+        
+        if (char === '\n') {
+            const sentence = buffer.substring(0, index).trim();
+            const rest = buffer.substring(index + 1);
+            if (sentence) {
+                return { sentence, rest };
+            } else {
+                buffer = rest;
+                regex.lastIndex = 0;
+                continue;
+            }
+        }
+        
+        const nextChar = buffer[index + 1];
+        const isBoundary = !nextChar || /\s/.test(nextChar);
+        
+        if (isBoundary) {
+            const preceding = buffer.substring(0, index);
+            const words = preceding.split(/\s+/);
+            const lastWord = words[words.length - 1];
+            
+            const isAbbr = /^[A-Z][a-z]?$|^(Mr|Mrs|Ms|Dr|Prof|Sr|Jr|vs|eg|ie|etc)$/i.test(lastWord);
+            const isNumber = /^[0-9]+$/.test(lastWord);
+            
+            if (!isAbbr && !isNumber) {
+                const sentence = buffer.substring(0, index + 1).trim();
+                const rest = buffer.substring(index + 1);
+                return { sentence, rest };
+            }
+        }
+    }
+    
+    if (isLastChunk) {
+        const sentence = buffer.trim();
+        if (sentence) {
+            return { sentence, rest: "" };
+        }
+    }
+    
+    return null;
+}
+
 class LLMPipeline extends EventEmitter {
+    constructor() {
+        super();
+        this.abortController = null;
+    }
+
+    abort() {
+        if (this.abortController) {
+            this.abortController.abort();
+            this.abortController = null;
+            addLog("[BRAIN] LLM stream cancelled.", "warning");
+        }
+    }
+
     async process(message) {
+        this.abort();
+        this.abortController = new AbortController();
+        const signal = this.abortController.signal;
+
         this.emit("start", message);
         appendChatBubble("user", message);
         addLog(`[INPUT] User input received: "${message}"`);
         
+        const chatMessages = document.getElementById("chat-messages");
+        
+        // Append placeholder assistant bubble
+        const bubble = document.createElement("div");
+        bubble.className = "chat-bubble assistant";
+        
+        const sender = document.createElement("div");
+        sender.className = "bubble-sender";
+        sender.textContent = "V.A.I.B.";
+        
+        const body = document.createElement("div");
+        body.className = "bubble-content";
+        body.textContent = "..."; // Placeholder indicator
+        
+        const time = document.createElement("div");
+        time.className = "bubble-time";
+        const now = new Date();
+        time.textContent = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+        
+        bubble.appendChild(sender);
+        bubble.appendChild(body);
+        bubble.appendChild(time);
+        
+        if (chatMessages) {
+            chatMessages.appendChild(bubble);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        const startTime = Date.now();
+        window.lastStartTime = startTime;
+        window.lastFirstTokenLatency = null;
+        window.lastFirstSentenceLatency = null;
+        window.lastTotalResponseLatency = null;
+        window.isFirstSentenceDetected = true;
+        window.isFirstTTSDispatched = true;
+        window.isFirstAudioReturned = true;
+        
+        // Reset HUD displays if they exist
+        const eToken = document.getElementById("diag-latency-token");
+        const eSentence = document.getElementById("diag-latency-sentence");
+        const eTotal = document.getElementById("diag-latency-total");
+        if (eToken) eToken.textContent = "-- ms";
+        if (eSentence) eSentence.textContent = "-- ms";
+        if (eTotal) eTotal.textContent = "-- ms";
+
         try {
-            const res = await fetch("/api/chat", {
+            // Attempt token-by-token streaming
+            const res = await fetch("/api/chat/stream", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ message: message })
+                body: JSON.stringify({ message: message }),
+                signal: signal
             });
             
             if (!res.ok) {
-                const errData = await res.json();
-                throw new Error(errData.detail || "Chat failed");
+                throw new Error("Streaming endpoint failed, falling back to REST...");
             }
             
-            const data = await res.json();
-            const reply = data.response || "";
-            appendChatBubble("assistant", reply);
-            addLog(`[BRAIN] Response synthesized successfully.`);
+            body.textContent = ""; // Clear placeholder
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder("utf-8");
+            let done = false;
+            let reply = "";
+            let sentenceBuffer = "";
+            let firstTokenLogged = false;
+            
+            // Update action text to indicate streaming status
+            const actionText = document.getElementById("core-action-text");
+            if (actionText) {
+                actionText.textContent = "RECEIVING CORE RESPONSE...";
+            }
+            
+            while (!done) {
+                const { value, done: doneReading } = await reader.read();
+                done = doneReading;
+                const chunkValue = decoder.decode(value, { stream: !done });
+                
+                if (chunkValue && !firstTokenLogged) {
+                    const elapsed = Date.now() - startTime;
+                    window.lastFirstTokenLatency = elapsed;
+                    if (eToken) eToken.textContent = `${elapsed} ms`;
+                    addLog(`[LATENCY] First token: ${elapsed}ms`, "info");
+                    addLog(`[TIMING] First token received: +${elapsed}ms`, "info");
+                    firstTokenLogged = true;
+                }
+
+                reply += chunkValue;
+                sentenceBuffer += chunkValue;
+                body.textContent = reply;
+                if (chatMessages) {
+                    chatMessages.scrollTop = chatMessages.scrollHeight;
+                }
+                
+                // Update the HUD streaming transcript area in real time!
+                const hud = document.getElementById("streaming-transcript-hud");
+                if (hud) {
+                    hud.textContent = reply;
+                    hud.scrollTop = hud.scrollHeight;
+                }
+
+                // Extract and emit sentences
+                let result;
+                while ((result = getNextSentence(sentenceBuffer, false)) !== null) {
+                    const sentence = result.sentence;
+                    sentenceBuffer = result.rest;
+                    if (sentence.trim() && !signal.aborted) {
+                        this.emit("sentence", sentence);
+                    }
+                }
+            }
+            
+            // Emit remaining buffer text
+            if (sentenceBuffer.trim() && !signal.aborted) {
+                this.emit("sentence", sentenceBuffer.trim());
+            }
+            
+            addLog(`[BRAIN] Response synthesized successfully via stream.`);
             
             // Reload cognitive memory panels dynamically
             if (typeof fetchProfile === 'function') await fetchProfile();
@@ -289,11 +478,97 @@ class LLMPipeline extends EventEmitter {
             
             this.emit("complete", reply);
             return reply;
+            
         } catch (e) {
-            this.emit("error", e);
-            appendChatBubble("assistant", "I had trouble computing that request, Sir. Please check my connections.");
-            throw e;
+            if (e.name === 'AbortError') {
+                throw e; // Stream cancelled
+            }
+            // REST Fallback if streaming fails
+            addLog(`[WARN] Streaming failed: ${e.message}. Falling back to standard REST...`, "warning");
+            try {
+                const res = await fetch("/api/chat", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ message: message }),
+                    signal: signal
+                });
+                
+                if (!res.ok) {
+                    const errData = await res.json();
+                    throw new Error(errData.detail || "Chat failed");
+                }
+                
+                const data = await res.json();
+                const reply = data.response || "";
+                body.textContent = reply;
+                if (chatMessages) {
+                    chatMessages.scrollTop = chatMessages.scrollHeight;
+                }
+                
+                const hud = document.getElementById("streaming-transcript-hud");
+                if (hud) {
+                    hud.textContent = reply;
+                    hud.scrollTop = hud.scrollHeight;
+                }
+                
+                // Track first token for REST as the response return time
+                if (!firstTokenLogged) {
+                    const elapsed = Date.now() - startTime;
+                    window.lastFirstTokenLatency = elapsed;
+                    if (eToken) eToken.textContent = `${elapsed} ms`;
+                    addLog(`[LATENCY] First token (REST): ${elapsed}ms`, "info");
+                }
+
+                // Split reply into sentences and emit them
+                let buffer = reply;
+                let result;
+                while ((result = getNextSentence(buffer, false)) !== null) {
+                    if (result.sentence.trim() && !signal.aborted) {
+                        this.emit("sentence", result.sentence);
+                    }
+                    buffer = result.rest;
+                }
+                if (buffer.trim() && !signal.aborted) {
+                    this.emit("sentence", buffer.trim());
+                }
+
+                addLog(`[BRAIN] Response synthesized successfully via REST fallback.`);
+                
+                // Reload cognitive memory panels dynamically
+                if (typeof fetchProfile === 'function') await fetchProfile();
+                if (typeof fetchFacts === 'function') await fetchFacts();
+                
+                this.emit("complete", reply);
+                return reply;
+            } catch (fallbackError) {
+                if (fallbackError.name === 'AbortError') {
+                    throw fallbackError;
+                }
+                this.emit("error", fallbackError);
+                body.textContent = "I had trouble computing that request, Sir. Please check my connections.";
+                if (chatMessages) {
+                    chatMessages.scrollTop = chatMessages.scrollHeight;
+                }
+                throw fallbackError;
+            }
         }
+    }
+}
+
+async function reportLatencyMetrics(tokenMs, sentenceMs, totalMs) {
+    try {
+        await fetch("/api/latency/report", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                first_token_latency_ms: tokenMs,
+                first_sentence_latency_ms: sentenceMs,
+                total_response_latency_ms: totalMs
+            })
+        });
+        addLog(`[LATENCY] Latency metrics recorded on server.`, "system");
+    } catch (e) {
+        console.error("Failed to report latency metrics:", e);
     }
 }
 
@@ -301,49 +576,303 @@ class TTSPipeline extends EventEmitter {
     constructor(audioElement) {
         super();
         this.audio = audioElement;
+        this.queue = [];
+        this.ttsRequestQueue = [];
+        this.ttsRequestActive = false;
+        this.isPlaying = false;
+        this.startTime = null;
+        this.isFirstSentence = true;
+        this.currentPlayingText = "";
         this.setupAudioListeners();
     }
     
     setupAudioListeners() {
         this.audio.onplay = () => {
             this.emit("play.start");
-            addLog("[SPEECH] Speaking response...");
+            addLog(`[SPEECH] Speaking response: "${this.currentPlayingText}"`);
+            
+            if (this.isFirstSentence && this.startTime) {
+                const firstSentenceSpokenLatency = Date.now() - this.startTime;
+                window.lastFirstSentenceLatency = firstSentenceSpokenLatency;
+                const eSentence = document.getElementById("diag-latency-sentence");
+                if (eSentence) eSentence.textContent = `${firstSentenceSpokenLatency} ms`;
+                addLog(`[LATENCY] First sentence spoken: ${firstSentenceSpokenLatency}ms`, "info");
+                addLog(`[TIMING] First audio playback started: +${firstSentenceSpokenLatency}ms ("${this.currentPlayingText}")`, "info");
+                this.isFirstSentence = false;
+            }
         };
+        
         this.audio.onended = () => {
-            this.emit("play.end");
-            addLog("[SPEECH] Speech transmission completed.", "system");
+            addLog("[SPEECH] Speech segment completed.", "system");
+            if (this.audio.src && this.audio.src.startsWith("blob:")) {
+                try { URL.revokeObjectURL(this.audio.src); } catch (err) {}
+            }
+            this.playNext();
         };
+        
         this.audio.onerror = (e) => {
             this.emit("error", e);
+            console.error("Playback error:", e);
+            if (this.audio.src && this.audio.src.startsWith("blob:")) {
+                try { URL.revokeObjectURL(this.audio.src); } catch (err) {}
+            }
+            this.playNext();
         };
     }
     
-    async speak(text) {
-        this.emit("start", text);
+    enqueueSentence(sentence, startTime) {
+        if (!sentence.trim()) return;
+        
+        if (this.startTime === null) {
+            this.startTime = startTime || Date.now();
+            this.isFirstSentence = true;
+        }
+        
+        let resolvePromise;
+        const promise = new Promise((resolve) => {
+            resolvePromise = resolve;
+        });
+
+        const item = {
+            text: sentence,
+            audioUrl: null,
+            status: 'pending',
+            promise: promise,
+            resolve: resolvePromise
+        };
+        
+        this.queue.push(item);
+        
+        // Trigger sequential throttled request pre-fetch
+        this.enqueueTTSRequest(item);
+        
+        if (!this.isPlaying) {
+            this.playNext();
+        }
+    }
+    
+    enqueueTTSRequest(item) {
+        this.ttsRequestQueue.push(item);
+        this.processNextTTSRequest();
+    }
+    
+    async processNextTTSRequest() {
+        if (this.ttsRequestActive || this.ttsRequestQueue.length === 0) {
+            return;
+        }
+        
+        this.ttsRequestActive = true;
+        const item = this.ttsRequestQueue.shift();
+        
+        // Brief sleep to avoid hammer-rate blocks
+        await new Promise(resolve => setTimeout(resolve, 80));
+        
+        try {
+            await this.fetchTTSForItem(item);
+        } catch (e) {
+            console.error("fetchTTSForItem worker failed:", e);
+        }
+        
+        this.ttsRequestActive = false;
+        this.processNextTTSRequest();
+    }
+    
+    async fetchTTSForItem(item) {
+        item.status = 'loading';
+        if (window.isFirstTTSDispatched) {
+            const elapsed = Date.now() - window.lastStartTime;
+            addLog(`[TIMING] First TTS request dispatched: +${elapsed}ms ("${item.text}")`, "info");
+            window.isFirstTTSDispatched = false;
+        }
         try {
             const res = await fetch("/api/tts", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ text: text })
+                body: JSON.stringify({ 
+                    text: item.text,
+                    voice: window.selectedVoice || "Friday"
+                })
             });
             
             if (!res.ok) throw new Error("TTS API error");
             
             const data = await res.json();
-            this.audio.src = data.audio_url;
+            if (window.isFirstAudioReturned) {
+                const elapsed = Date.now() - window.lastStartTime;
+                addLog(`[TIMING] First audio returned: +${elapsed}ms`, "info");
+                window.isFirstAudioReturned = false;
+            }
+            
+            // Prefetch audio as blob to avoid secondary GET request latency
+            let finalUrl = data.audio_url;
+            try {
+                const audioRes = await fetch(data.audio_url);
+                if (audioRes.ok) {
+                    const blob = await audioRes.blob();
+                    finalUrl = URL.createObjectURL(blob);
+                }
+            } catch (fetchErr) {
+                console.warn("[AUDIO] Pre-fetching audio blob failed, falling back to direct URL:", fetchErr);
+            }
+            
+            item.audioUrl = finalUrl;
+            item.status = 'ready';
+            item.resolve(finalUrl);
+            return finalUrl;
+        } catch (e) {
+            console.error("Failed to fetch TTS for sentence:", item.text, e);
+            item.status = 'failed';
+            item.resolve(null);
+            return null;
+        }
+    }
+    
+    async playNext() {
+        if (this.queue.length === 0) {
+            this.isPlaying = false;
+            this.startTime = null;
+            this.emit("play.end");
+            addLog("[SPEECH] Speech transmission completed.", "system");
+            
+            // Log final latency metrics
+            if (window.lastStartTime) {
+                const totalResponseLatency = Date.now() - window.lastStartTime;
+                window.lastTotalResponseLatency = totalResponseLatency;
+                const eTotal = document.getElementById("diag-latency-total");
+                if (eTotal) eTotal.textContent = `${totalResponseLatency} ms`;
+                addLog(`[LATENCY] Total response latency: ${totalResponseLatency}ms`, "info");
+                
+                // Write/report latency details to backend
+                await reportLatencyMetrics(
+                    window.lastFirstTokenLatency,
+                    window.lastFirstSentenceLatency,
+                    window.lastTotalResponseLatency
+                );
+            }
+            return;
+        }
+        
+        this.isPlaying = true;
+        const current = this.queue[0];
+        
+        if (current.status === 'pending' || current.status === 'loading') {
+            const url = await current.promise;
+            
+            // Check if we were interrupted or queue was cleared while awaiting
+            if (this.queue.length === 0 || this.queue[0] !== current) {
+                return;
+            }
+            
+            if (!url) {
+                this.queue.shift();
+                this.playNext();
+                return;
+            }
+        } else if (current.status === 'failed') {
+            this.queue.shift();
+            this.playNext();
+            return;
+        }
+        
+        const currentReady = this.queue.shift();
+        if (!currentReady) {
+            this.isPlaying = false;
+            return;
+        }
+        
+        try {
+            this.audio.src = currentReady.audioUrl;
+            currentReady.status = 'playing';
+            this.currentPlayingText = currentReady.text;
             await this.audio.play();
         } catch (e) {
-            this.emit("error", e);
-            console.error("TTS failed:", e);
+            if (e.name === 'NotAllowedError') {
+                console.warn("[AUDIO] Playback blocked by browser autoplay policy. Holding sentence queue.");
+                // Put the item back at the front of the queue
+                currentReady.status = 'ready';
+                this.queue.unshift(currentReady);
+                this.isPlaying = false;
+                
+                // Add a one-time interaction handler to resume
+                const forceUnlockAndPlay = async () => {
+                    window.removeEventListener("click", forceUnlockAndPlay);
+                    window.removeEventListener("keydown", forceUnlockAndPlay);
+                    window.removeEventListener("touchstart", forceUnlockAndPlay);
+                    
+                    try {
+                        const silentAudio = new Audio("data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQQAAAAAAA== ");
+                        await silentAudio.play();
+                    } catch (err) {}
+                    
+                    if (!this.isPlaying) {
+                        this.playNext();
+                    }
+                };
+                window.addEventListener("click", forceUnlockAndPlay);
+                window.addEventListener("keydown", forceUnlockAndPlay);
+                window.addEventListener("touchstart", forceUnlockAndPlay);
+            } else {
+                console.error("Playback execution failed:", e);
+                if (currentReady.audioUrl && currentReady.audioUrl.startsWith("blob:")) {
+                    try { URL.revokeObjectURL(currentReady.audioUrl); } catch (err) {}
+                }
+                this.playNext();
+            }
+        }
+    }
+    
+    async speak(text) {
+        this.interrupt();
+        
+        // Support direct speak calls by splitting into sentences and enqueuing
+        if (!window.lastStartTime) {
+            window.lastStartTime = Date.now();
+        }
+        
+        let buffer = text;
+        let result;
+        const sentences = [];
+        while ((result = getNextSentence(buffer, false)) !== null) {
+            if (result.sentence.trim()) {
+                sentences.push(result.sentence);
+            }
+            buffer = result.rest;
+        }
+        if (buffer.trim()) {
+            sentences.push(buffer.trim());
+        }
+        
+        for (const sentence of sentences) {
+            this.enqueueSentence(sentence, window.lastStartTime);
         }
     }
     
     interrupt() {
+        if (window.llmPipeline) {
+            window.llmPipeline.abort();
+        }
         if (!this.audio.paused) {
             this.audio.pause();
-            this.emit("interrupted");
             addLog("[SYSTEM] Speech playback interrupted by user.", "system");
         }
+        
+        // Revoke Object URLs for items in the queue to prevent memory leaks
+        this.queue.forEach(item => {
+            if (item.audioUrl && item.audioUrl.startsWith("blob:")) {
+                try { URL.revokeObjectURL(item.audioUrl); } catch (err) {}
+            }
+        });
+        if (this.audio.src && this.audio.src.startsWith("blob:")) {
+            try { URL.revokeObjectURL(this.audio.src); } catch (err) {}
+        }
+        
+        this.queue = [];
+        this.ttsRequestQueue = [];
+        this.ttsRequestActive = false;
+        this.isPlaying = false;
+        this.startTime = null;
+        this.isFirstSentence = true;
+        this.emit("interrupted");
     }
 }
 
@@ -493,10 +1022,12 @@ class VoiceSessionManager extends EventEmitter {
         this.state = "processing";
         this.updateHUDState("processing");
         try {
-            const reply = await this.llm.process(text);
-            this.state = "speaking";
-            this.updateHUDState("speaking");
-            await this.tts.speak(reply);
+            await this.llm.process(text);
+            setTimeout(() => {
+                if (!this.tts.isPlaying && this.tts.queue.length === 0) {
+                    this.returnToListeningOrIdle();
+                }
+            }, 150);
         } catch (e) {
             this.returnToListeningOrIdle();
         }
@@ -547,6 +1078,7 @@ class VoiceSessionManager extends EventEmitter {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+    window.selectedVoice = "Friday";
     // Expose local functions to window for globally scoped helper routing
     window.addLog = addLog;
     window.setUIState = setUIState;
@@ -554,6 +1086,9 @@ document.addEventListener("DOMContentLoaded", () => {
     window.loggerError = loggerError;
     window.fetchProfile = fetchProfile;
     window.fetchFacts = fetchFacts;
+    window.updateStreamingHUD = updateStreamingHUD;
+    window.startStreamingRecognition = startStreamingRecognition;
+    window.stopStreamingRecognition = stopStreamingRecognition;
 
     // UI Elements
     const timeDisplay = document.getElementById("time-display");
@@ -621,6 +1156,15 @@ document.addEventListener("DOMContentLoaded", () => {
     const vadEngine = new VADEngine();
     const voiceSessionManager = new VoiceSessionManager(vadEngine, sttPipeline, llmPipeline, ttsPipeline);
 
+    llmPipeline.on("sentence", (sentence) => {
+        if (window.isFirstSentenceDetected) {
+            const elapsed = Date.now() - window.lastStartTime;
+            addLog(`[TIMING] First complete sentence detected: +${elapsed}ms ("${sentence}")`, "info");
+            window.isFirstSentenceDetected = false;
+        }
+        ttsPipeline.enqueueSentence(sentence, window.lastStartTime);
+    });
+
     // Attach to window for automated end-to-end integration testing and developer diagnostics
     window.sttPipeline = sttPipeline;
     window.llmPipeline = llmPipeline;
@@ -632,6 +1176,27 @@ document.addEventListener("DOMContentLoaded", () => {
     const toggleContinuousVoice = document.getElementById("toggle-continuous-voice");
     const sliderMicThreshold = document.getElementById("slider-mic-threshold");
     const labelVadThreshold = document.getElementById("label-vad-threshold");
+    const selectVoiceProfile = document.getElementById("select-voice-profile");
+
+    if (selectVoiceProfile) {
+        selectVoiceProfile.addEventListener("change", async (e) => {
+            const selectedVal = e.target.value;
+            window.selectedVoice = selectedVal;
+            addLog(`[SYSTEM] Voice profile updated to: ${selectedVal}`, "system");
+            
+            // Persist preference to the backend profile database
+            try {
+                await fetch("/api/profile", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ key: "selected_voice", value: selectedVal })
+                });
+                await fetchProfile();
+            } catch (err) {
+                console.error("Failed to save selected voice profile:", err);
+            }
+        });
+    }
 
     if (toggleContinuousVoice) {
         toggleContinuousVoice.addEventListener("change", (e) => {
@@ -731,6 +1296,8 @@ document.addEventListener("DOMContentLoaded", () => {
         line.textContent = `[${timestamp}] ${text}`;
         consoleStream.appendChild(line);
         consoleStream.scrollTop = consoleStream.scrollHeight;
+        
+        console.log(`[${type.toUpperCase()}] ${text}`);
         
         sendLogToServer(type === "error" ? "error" : type === "system" ? "warning" : "info", text);
     }
@@ -975,16 +1542,20 @@ document.addEventListener("DOMContentLoaded", () => {
         ttsPipeline.interrupt();
         setUIState("thinking", "COMPUTING MATRIX");
         try {
-            const reply = await llmPipeline.process(message);
-            setUIState("speaking", "TRANSMITTING SPEECH");
-            await ttsPipeline.speak(reply);
+            await llmPipeline.process(message);
+            setTimeout(() => {
+                if (!ttsPipeline.isPlaying && ttsPipeline.queue.length === 0) {
+                    setUIState("standby");
+                }
+            }, 150);
         } catch (err) {
             setUIState("standby");
         }
     }
 
     // Chat submit handler
-    chatForm.addEventListener("submit", async () => {
+    chatForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
         const msg = chatInput.value.trim();
         if (!msg) return;
         chatInput.value = "";
@@ -1057,18 +1628,21 @@ document.addEventListener("DOMContentLoaded", () => {
                 // Stop mic capture tracks after recording stops to prevent encoding truncation
                 stream.getTracks().forEach(track => track.stop());
 
-                setUIState("thinking", "TRANSCRIBING WHISPER");
-                addLog("[AUDIO] Voice capture complete. Commencing transcription...", "info");
-                
+                const duration = Date.now() - recordingStartTime;
                 const audioBlob = new Blob(audioChunks, { type: options.mimeType || 'audio/webm' });
-                if (audioChunks.length === 0 || audioBlob.size === 0) {
-                    addLog("[AUDIO] No audio data captured.", "warning");
+                
+                // Enforce minimum size and duration to avoid sending empty/metadata-only headers
+                if (audioChunks.length === 0 || audioBlob.size < 500 || duration < 300) {
+                    addLog(`[AUDIO] Capture discarded (duration: ${duration}ms, size: ${audioBlob.size} bytes).`, "warning");
                     setUIState("standby");
                     if (typeof voiceSessionManager !== 'undefined' && voiceSessionManager.mode === "auto-wake") {
                         voiceSessionManager.returnToListeningOrIdle();
                     }
                     return;
                 }
+
+                setUIState("thinking", "TRANSCRIBING WHISPER");
+                addLog("[AUDIO] Voice capture complete. Commencing transcription...", "info");
 
                 const formData = new FormData();
                 formData.append("file", audioBlob, "user_voice.webm");
@@ -1339,6 +1913,15 @@ document.addEventListener("DOMContentLoaded", () => {
             const res = await fetch("/api/profile");
             if (!res.ok) throw new Error("Failed to fetch profile");
             const profile = await res.json();
+            
+            if (profile.selected_voice) {
+                window.selectedVoice = profile.selected_voice;
+                const dropdown = document.getElementById("select-voice-profile");
+                if (dropdown) {
+                    dropdown.value = profile.selected_voice;
+                }
+            }
+
             profileList.innerHTML = "";
             
             const keys = Object.keys(profile);
@@ -1722,6 +2305,26 @@ document.addEventListener("DOMContentLoaded", () => {
             console.error("Delete goal error:", err);
         }
     }
+
+    // Global silent audio unlocker to bypass Browser Autoplay Policy on first user interaction
+    const unlockAudio = async () => {
+        try {
+            // Play a brief silent sound using the Data URI of a tiny blank WAV file
+            const silentAudio = new Audio("data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQQAAAAAAA== ");
+            await silentAudio.play();
+            addLog("[SYSTEM] Audio interface unlocked and active.", "system");
+            
+            // Remove listeners after first activation
+            window.removeEventListener("click", unlockAudio);
+            window.removeEventListener("keydown", unlockAudio);
+            window.removeEventListener("touchstart", unlockAudio);
+        } catch (e) {
+            console.warn("[AUDIO] Silent playback failed to unlock audio:", e);
+        }
+    };
+    window.addEventListener("click", unlockAudio);
+    window.addEventListener("keydown", unlockAudio);
+    window.addEventListener("touchstart", unlockAudio);
 
     // Notify user initialization is complete
     addLog("[SYSTEM] V.A.I.B. cognitive matrix ready.", "positive");

@@ -28,12 +28,31 @@ class STTManager:
             raise FileNotFoundError(f"Audio file not found at {audio_file_path}")
 
         try:
-            logger.info(f"Transcribing audio file locally: {audio_file_path.name}")
-            
+            file_size = audio_file_path.stat().st_size
+        except OSError:
+            file_size = 0
+
+        logger.info(f"[STT] Starting transcription. File size: {file_size} bytes. File path: '{audio_file_path}'")
+
+        try:
             # Define transcription call to run in executor
             def run_inference():
                 segments, info = self.model.transcribe(str(audio_file_path), beam_size=5)
-                return "".join([segment.text for segment in segments]).strip()
+                text = "".join([segment.text for segment in segments]).strip()
+                if info is not None:
+                    logger.info(
+                        f"[STT Diagnostics] Backend Selected: Local Whisper (tiny) | "
+                        f"Audio Duration: {info.duration:.2f}s | "
+                        f"Detected Language: '{info.language}' (confidence: {info.language_probability:.2f}) | "
+                        f"Transcribed Text Length: {len(text)} characters"
+                    )
+                else:
+                    logger.info(
+                        f"[STT Diagnostics] Backend Selected: Local Whisper (tiny) | "
+                        f"Info metadata: None | "
+                        f"Transcribed Text Length: {len(text)} characters"
+                    )
+                return text
 
             # Run CPU-bound task in the default ThreadPoolExecutor
             loop = asyncio.get_event_loop()

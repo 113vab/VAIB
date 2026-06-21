@@ -9,12 +9,11 @@ def run_verification():
     # 1. Start the FastAPI server as a subprocess
     server_process = subprocess.Popen(
         [sys.executable, "run.py"],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL
     )
     print("Starting V.A.I.B. server process...")
-    time.sleep(3.0)  # Wait for server to spin up and load
+    time.sleep(9.0)  # Wait for server to spin up and load
     
     tests_passed = 0
     total_tests = 5

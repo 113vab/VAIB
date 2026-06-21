@@ -5,11 +5,11 @@ from pathlib import Path
 from typing import Optional
 from fastapi import FastAPI, UploadFile, File, HTTPException, Depends
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.responses import HTMLResponse, FileResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from app.config import logger, PORT, HOST, DATA_DIR
+from app.config import logger, PORT, HOST, DATA_DIR, LLM_MODEL
 from app.brain.memory import MemoryManager
 from app.brain.agent import VaibAgent
 from app.voice.tts import TTSManager
@@ -117,38 +117,95 @@ async def chat_endpoint(request: ChatRequest):
         logger.error(f"Error in chat endpoint: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/chat/stream")
+async def chat_stream_endpoint(request: ChatRequest):
+    """Streaming text-based interaction endpoint."""
+    if not request.message.strip():
+        raise HTTPException(status_code=400, detail="Message cannot be empty")
+    try:
+        async def event_generator():
+            try:
+                async for token in agent.generate_response_stream(request.message):
+                    yield token
+            except Exception as stream_err:
+                logger.error(f"Error in stream generation: {stream_err}")
+                yield f"\n[STREAM ERROR: {str(stream_err)}]"
+
+        return StreamingResponse(
+            event_generator(),
+            media_type="text/plain",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no"
+            }
+        )
+    except Exception as e:
+        logger.error(f"Error starting chat stream: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/api/stt")
 async def stt_endpoint(file: UploadFile = File(...)):
     """Upload recorded audio and transcribe using Whisper."""
-    logger.info(f"Received audio file for STT: {file.filename}")
+    import time
+    logger.info(f"[STT] Received audio file for STT: {file.filename}")
     
-    # Save the uploaded file to a temporary location
-    suffix = Path(file.filename).suffix or ".wav"
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_audio:
-        try:
-            shutil.copyfileobj(file.file, temp_audio)
-            temp_path = Path(temp_audio.name)
-        except Exception as e:
-            logger.error(f"Failed to save temp audio: {e}")
-            raise HTTPException(status_code=500, detail="Failed to parse audio file")
+    try:
+        # Read the file contents asynchronously to ensure they are fully in memory
+        contents = await file.read()
+        byte_size = len(contents)
+        logger.info(f"[STT] Uploaded file size: {byte_size} bytes")
+    except Exception as e:
+        logger.error(f"[STT] Failed to read uploaded file: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to read uploaded file: {str(e)}")
 
+    if byte_size == 0:
+        logger.error("[STT] Uploaded audio file is empty (0 bytes). Rejecting request to prevent EOF error.")
+        raise HTTPException(
+            status_code=400, 
+            detail="Uploaded audio file is empty. Please verify microphone/capture settings."
+        )
+
+    # Save to a temporary file ensuring proper lifecycle
+    suffix = Path(file.filename).suffix or ".webm"
+    temp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_audio:
+            temp_audio.write(contents)
+            temp_audio.flush()
+            temp_path = Path(temp_audio.name)
+            
+        disk_size = temp_path.stat().st_size
+        logger.info(f"[STT] Created temporary file: '{temp_path.name}' on disk ({disk_size} bytes)")
+    except Exception as e:
+        logger.error(f"[STT] Failed to write temporary audio file to disk: {e}")
+        if temp_path and temp_path.exists():
+            try: os.unlink(temp_path)
+            except Exception: pass
+        raise HTTPException(status_code=500, detail=f"Failed to write audio file to disk: {str(e)}")
+
+    start_time = time.time()
     try:
         # Transcribe using Whisper
+        logger.info(f"[STT] Commencing local Whisper transcription for '{temp_path.name}'...")
         transcription = await stt.transcribe_audio(temp_path)
+        elapsed = time.time() - start_time
+        logger.info(f"[STT] Transcription complete in {elapsed:.2f}s. Result: '{transcription}'")
         return {"text": transcription}
     except ValueError as ve:
-        logger.warning(f"Whisper STT Configuration Error: {ve}")
+        logger.warning(f"[STT] Whisper STT Configuration Error: {ve}")
         raise HTTPException(status_code=400, detail="STT_KEY_MISSING")
     except Exception as e:
-        logger.error(f"Transcription error: {e}")
+        logger.error(f"[STT] Transcription engine failed: {e}")
         raise HTTPException(status_code=500, detail=f"Transcription failed: {str(e)}")
     finally:
-        # Clean up temporary file
-        if temp_path.exists():
+        # Clean up temporary file safely
+        if temp_path and temp_path.exists():
             try:
                 os.unlink(temp_path)
+                logger.info(f"[STT] Cleaned up temporary file: '{temp_path.name}'")
             except Exception as e:
-                logger.error(f"Failed to delete temp file {temp_path}: {e}")
+                logger.error(f"[STT] Failed to delete temporary file {temp_path}: {e}")
 
 @app.post("/api/tts")
 async def tts_endpoint(request: TTSRequest):
@@ -431,6 +488,43 @@ async def delete_agent_goal(goal_id: int):
     if not success:
          raise HTTPException(status_code=500, detail="Failed to delete agent goal.")
     return {"status": "success", "message": "Goal deleted successfully."}
+
+class LatencyReportRequest(BaseModel):
+    first_token_latency_ms: Optional[float] = None
+    first_sentence_latency_ms: Optional[float] = None
+    total_response_latency_ms: Optional[float] = None
+
+@app.post("/api/latency/report")
+async def report_latency_endpoint(request: LatencyReportRequest):
+    """Logs latency metrics and writes them to latency_report.md."""
+    try:
+        report_path = Path(__file__).resolve().parent.parent / "latency_report.md"
+        
+        active_provider = "unknown"
+        if hasattr(agent, "router"):
+            active_provider = getattr(agent.router, "preferred_provider_name", "unknown")
+        active_model = LLM_MODEL or "unknown"
+        
+        if not report_path.exists():
+            with open(report_path, "w", encoding="utf-8") as f:
+                f.write("# Latency Metrics Report\n\n")
+                f.write("| Timestamp | Provider | Model | First Token Latency (ms) | First Sentence Spoken Latency (ms) | Total Response Latency (ms) |\n")
+                f.write("| --- | --- | --- | --- | --- | --- |\n")
+                
+        import datetime
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        token_ms = f"{request.first_token_latency_ms:.1f}" if request.first_token_latency_ms is not None else "N/A"
+        sentence_ms = f"{request.first_sentence_latency_ms:.1f}" if request.first_sentence_latency_ms is not None else "N/A"
+        total_ms = f"{request.total_response_latency_ms:.1f}" if request.total_response_latency_ms is not None else "N/A"
+        
+        with open(report_path, "a", encoding="utf-8") as f:
+            f.write(f"| {timestamp} | {active_provider} | {active_model} | {token_ms} | {sentence_ms} | {total_ms} |\n")
+            
+        logger.info(f"[LATENCY REPORT] Logged metrics: Token={token_ms}ms, Sentence={sentence_ms}ms, Total={total_ms}ms")
+        return {"status": "success", "message": "Metrics logged."}
+    except Exception as e:
+        logger.error(f"Error logging latency metrics: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 # Also mount static assets under /static for stylesheet, scripts, etc.
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")

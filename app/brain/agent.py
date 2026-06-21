@@ -1,7 +1,7 @@
 import os
 import time
 import logging
-from typing import List, Dict, Any, Optional, Union
+from typing import List, Dict, Any, Optional, Union, AsyncIterator
 import google.generativeai as genai
 from google.generativeai.types import ContentDict, PartDict
 from app.config import logger, GEMINI_API_KEY, LLM_PROVIDER, LLM_MODEL
@@ -562,3 +562,70 @@ class VaibAgent:
         except Exception as e:
             logger.error(f"Error in agent generate_response: {e}")
             return f"I ran into an internal error processing that, Sir: {str(e)}"
+
+    async def generate_response_stream(self, user_input: str) -> AsyncIterator[str]:
+        """
+        Processes user query in streaming mode, querying memory, running tool calls,
+        and yielding tokens as they arrive. Updates memory upon stream completion.
+        All LLM calls are routed through the Provider Router with fallback.
+        """
+        try:
+            # Check if any LLM provider is healthy. If not, run local simulation mode.
+            any_healthy = False
+            for prov in self.router.providers.values():
+                if await prov.is_healthy():
+                    any_healthy = True
+                    break
+                    
+            if not any_healthy:
+                logger.warning("No healthy LLM providers found. Cascading fallback to local Simulation Mode.")
+                sim_text = await self._generate_response_simulation(user_input)
+                import re
+                import asyncio
+                for token in re.split(r'(\s+)', sim_text):
+                    if token:
+                        yield token
+                        await asyncio.sleep(0.03)
+                return
+
+            # 1. Build cognitive system context (Profile, Summary, semantic Facts)
+            system_context = self.context_manager.build_system_context(user_input)
+            
+            # 2. Retrieve recent chat history
+            history = self.memory.get_chat_history(limit=10)
+            
+            # 3. Route response generation through provider router
+            accumulated_text = ""
+            async for token in self.router.generate_response_stream(
+                system_context=system_context,
+                history=history,
+                user_input=user_input,
+                tools=self.tools_list,
+                execute_tool_callback=self.execute_tool
+            ):
+                accumulated_text += token
+                yield token
+
+            # If the router fell back to simulation mode text anyway (e.g. during generation failure)
+            if "Simulation Mode" in accumulated_text:
+                logger.warning("Router fell back to Simulation Mode during generation. Checking local keyword-based simulation.")
+                sim_text = await self._generate_response_simulation(user_input)
+                # If it's just the default simulation warning, don't duplicate it since the router already yielded it
+                if "I am currently operating in simulation mode, Sir." not in sim_text:
+                    import re
+                    for token in re.split(r'(\s+)', sim_text):
+                        if token:
+                            yield token
+                return
+
+            # Save this turn to SQLite history
+            self.memory.add_chat_message("user", user_input)
+            self.memory.add_chat_message("assistant", accumulated_text)
+            
+            # Trigger automatic summarization checklist
+            active_gemini_model = self.router.get_active_model_for_summarizer()
+            self.summarizer.auto_summarize_if_needed(active_gemini_model)
+            
+        except Exception as e:
+            logger.error(f"Error in agent generate_response_stream: {e}")
+            yield f"I ran into an internal error processing that, Sir: {str(e)}"

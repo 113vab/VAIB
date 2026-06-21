@@ -121,7 +121,8 @@ class LLMProvider(abc.ABC):
         system_context: str,
         history: List[Dict[str, str]],
         user_input: str,
-        tools: List[Any]
+        tools: List[Any],
+        execute_tool_callback
     ) -> AsyncIterator[str]:
         pass
 
@@ -245,19 +246,104 @@ class GeminiProvider(LLMProvider):
         system_context: str,
         history: List[Dict[str, str]],
         user_input: str,
-        tools: List[Any]
+        tools: List[Any],
+        execute_tool_callback
     ) -> AsyncIterator[str]:
-        # Minimal placeholder stream (not full duplex yet)
         if not self.model:
             yield "Gemini API offline"
             return
-        
-        # Build contents
-        contents = [{"role": "user", "content": user_input}]
-        resp = self.model.generate_content(contents, stream=True)
-        for chunk in resp:
-            if chunk.text:
-                yield chunk.text
+
+        # 1. Format contents payload for Gemini SDK
+        contents = []
+        if system_context:
+            contents.append({
+                "role": "user",
+                "parts": [{"text": f"[System Context (DO NOT REPEAT VERBATIM unless relevant)]:\n{system_context}\nPlease keep this in mind during the conversation."}]
+            })
+            contents.append({
+                "role": "model",
+                "parts": [{"text": "Acknowledged, Sir. I have loaded the profile preferences, conversation summaries, and recalled long-term details."}]
+            })
+
+        for msg in history:
+            contents.append({
+                "role": "user" if msg["role"] == "user" else "model",
+                "parts": [{"text": msg["content"]}]
+            })
+
+        contents.append({
+            "role": "user",
+            "parts": [{"text": user_input}]
+        })
+
+        max_turns = 5
+        turns = 0
+
+        while turns < max_turns:
+            response_stream = self.model.generate_content(contents, stream=True)
+            stream_iterator = iter(response_stream)
+            
+            try:
+                first_chunk = next(stream_iterator)
+            except StopIteration:
+                break
+                
+            has_function_call = False
+            parts = []
+            if first_chunk.candidates and len(first_chunk.candidates) > 0:
+                parts = first_chunk.candidates[0].content.parts
+                if parts and any(part.function_call for part in parts):
+                    has_function_call = True
+            
+            if has_function_call:
+                # Consume the rest of the stream to get all parts of the function call (if any)
+                all_parts = list(first_chunk.candidates[0].content.parts)
+                for chunk in stream_iterator:
+                    if chunk.candidates and len(chunk.candidates) > 0:
+                        all_parts.extend(chunk.candidates[0].content.parts)
+                
+                turns += 1
+                logger.info(f"Gemini LLM requested tool execution (turn {turns}) in stream")
+                
+                # Construct the full model content we received
+                model_content = genai.types.Content(
+                    role="model",
+                    parts=all_parts
+                )
+                contents.append(model_content)
+                
+                function_response_parts = []
+                for part in all_parts:
+                    if part.function_call:
+                        fc = part.function_call
+                        tool_result = await execute_tool_callback(fc.name, dict(fc.args))
+                        
+                        if isinstance(tool_result, dict) and tool_result.get("status") == "pending_approval":
+                            action_id = tool_result.get("action_id")
+                            yield f"I need your confirmation to execute this action, Sir. A prompt has been posted to your dashboard (Action ID: {action_id})."
+                            return
+                            
+                        tool_result_str = str(tool_result)
+                        function_response_parts.append({
+                            "function_response": {
+                                "name": fc.name,
+                                "response": {"result": tool_result_str}
+                            }
+                        })
+                
+                contents.append({
+                    "role": "user",
+                    "parts": function_response_parts
+                })
+                continue
+            else:
+                # No function call, yield content and finish streaming
+                if first_chunk.text:
+                    yield first_chunk.text
+                for chunk in stream_iterator:
+                    if chunk.text:
+                        yield chunk.text
+                break
 
 
 class OpenAICompatibleProvider(LLMProvider):
@@ -363,36 +449,121 @@ class OpenAICompatibleProvider(LLMProvider):
         system_context: str,
         history: List[Dict[str, str]],
         user_input: str,
-        tools: List[Any]
+        tools: List[Any],
+        execute_tool_callback
     ) -> AsyncIterator[str]:
+        from app.brain.agent import SYSTEM_PROMPT
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
-            
-        messages = [{"role": "user", "content": user_input}]
-        payload = {
-            "model": self.model_name,
-            "messages": messages,
-            "stream": True
-        }
+
+        messages = [
+            {"role": "system", "content": f"{SYSTEM_PROMPT}\n\n[System Context]:\n{system_context}"}
+        ]
+        for h in history:
+            messages.append({"role": h["role"], "content": h["content"]})
+        messages.append({"role": "user", "content": user_input})
+        
+        openai_tools = [function_to_openai_tool(t) for t in tools]
         
         async with httpx.AsyncClient() as client:
-            async with client.stream("POST", self.url, json=payload, headers=headers, timeout=30.0) as resp:
-                if resp.status_code != 200:
-                    yield f"Error: API returned {resp.status_code}"
-                    return
-                async for line in resp.aiter_lines():
-                    if line.startswith("data: "):
-                        data_str = line[6:].strip()
-                        if data_str == "[DONE]":
-                            break
+            turns = 0
+            max_turns = 5
+            
+            while turns < max_turns:
+                payload = {
+                    "model": self.model_name,
+                    "messages": messages,
+                    "tools": openai_tools if openai_tools else None,
+                    "tool_choice": "auto" if openai_tools else None,
+                    "stream": True
+                }
+                
+                async with client.stream("POST", self.url, json=payload, headers=headers, timeout=60.0) as resp:
+                    if resp.status_code != 200:
+                        err_text = await resp.aread()
+                        raise RuntimeError(f"API request failed with {resp.status_code}: {err_text.decode('utf-8')}")
+                    
+                    has_tool_calls = False
+                    tool_calls_dict = {}
+                    
+                    async for line in resp.aiter_lines():
+                        if line.startswith("data: "):
+                            data_str = line[6:].strip()
+                            if data_str == "[DONE]":
+                                break
+                            try:
+                                data_json = json.loads(data_str)
+                                choices = data_json.get("choices", [])
+                                if not choices:
+                                    continue
+                                delta = choices[0].get("delta", {})
+                                
+                                delta_tool_calls = delta.get("tool_calls")
+                                if delta_tool_calls:
+                                    has_tool_calls = True
+                                    for tc in delta_tool_calls:
+                                        idx = tc.get("index", 0)
+                                        if idx not in tool_calls_dict:
+                                            tool_calls_dict[idx] = {
+                                                "id": tc.get("id", ""),
+                                                "type": "function",
+                                                "function": {
+                                                    "name": tc.get("function", {}).get("name", ""),
+                                                    "arguments": tc.get("function", {}).get("arguments", "")
+                                                }
+                                            }
+                                        else:
+                                            if "id" in tc and tc["id"]:
+                                                tool_calls_dict[idx]["id"] = tc["id"]
+                                            if "function" in tc:
+                                                fn = tc["function"]
+                                                if "name" in fn and fn["name"]:
+                                                    tool_calls_dict[idx]["function"]["name"] = fn["name"]
+                                                if "arguments" in fn and fn["arguments"]:
+                                                    tool_calls_dict[idx]["function"]["arguments"] += fn["arguments"]
+                                
+                                token = delta.get("content", "")
+                                if token and not has_tool_calls:
+                                    yield token
+                            except Exception:
+                                pass
+                                
+                if has_tool_calls:
+                    turns += 1
+                    logger.info(f"OpenAICompatible LLM requested tool execution (turn {turns}) in stream")
+                    tool_calls = [v for k, v in sorted(tool_calls_dict.items())]
+                    
+                    messages.append({
+                        "role": "assistant",
+                        "tool_calls": tool_calls
+                    })
+                    
+                    for tc in tool_calls:
+                        func = tc["function"]
+                        name = func["name"]
+                        args_str = func["arguments"] or "{}"
                         try:
-                            data_json = json.loads(data_str)
-                            token = data_json["choices"][0]["delta"].get("content", "")
-                            if token:
-                                yield token
+                            args = json.loads(args_str)
                         except Exception:
-                            pass
+                            args = {}
+                            
+                        tool_result = await execute_tool_callback(name, args)
+                        
+                        if isinstance(tool_result, dict) and tool_result.get("status") == "pending_approval":
+                            action_id = tool_result.get("action_id")
+                            yield f"I need your confirmation to execute this action, Sir. A prompt has been posted to your dashboard (Action ID: {action_id})."
+                            return
+                            
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tc["id"],
+                            "name": name,
+                            "content": str(tool_result)
+                        })
+                    continue
+                else:
+                    break
 
 
 class GroqProvider(OpenAICompatibleProvider):
@@ -488,6 +659,45 @@ class LLMProviderRouter:
         # Fallback to offline Simulation mode if all providers fail
         logger.warning("All LLM providers are unhealthy or failed during execution. Cascading fallback to Simulation Mode.")
         return await self._generate_response_simulation(user_input)
+
+    async def generate_response_stream(
+        self,
+        system_context: str,
+        history: List[Dict[str, str]],
+        user_input: str,
+        tools: List[Any],
+        execute_tool_callback
+    ) -> AsyncIterator[str]:
+        # Fallback chain: Gemini -> Groq -> DeepSeek -> Ollama -> Simulation
+        fallback_order = ["gemini", "groq", "deepseek", "ollama"]
+        
+        search_list = []
+        if self.preferred_provider_name in fallback_order:
+            search_list.append(self.preferred_provider_name)
+        for p in fallback_order:
+            if p not in search_list:
+                search_list.append(p)
+            
+        for prov_name in search_list:
+            prov = self.providers[prov_name]
+            if await prov.is_healthy():
+                try:
+                    logger.info(f"Provider Router: Routing streaming request to active provider '{prov_name}'...")
+                    async for token in prov.generate_response_stream(
+                        system_context, history, user_input, tools, execute_tool_callback
+                    ):
+                        yield token
+                    return
+                except Exception as e:
+                    logger.warning(f"Active provider '{prov_name}' failed during streaming execution: {e}. Cascading fallback...")
+
+        logger.warning("All LLM providers are unhealthy or failed during execution. Cascading fallback to Simulation Mode.")
+        sim_response = await self._generate_response_simulation(user_input)
+        import asyncio
+        for token in re.split(r'(\s+)', sim_response):
+            if token:
+                yield token
+                await asyncio.sleep(0.03)
 
     async def _generate_response_simulation(self, user_input: str) -> str:
         """Simulation fallback if all configured providers are offline."""
