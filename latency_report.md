@@ -41,3 +41,4 @@ Below are the logged latency metrics from local simulation and API runs:
 | 2026-06-22 01:48:03 | gemini | gemini-2.5-flash | 1645.0 | 5904.0 | 35767.0 |
 | 2026-06-22 01:55:02 | gemini | gemini-2.5-flash | 2270.0 | 4335.0 | 30726.0 |
 | 2026-06-22 02:04:29 | gemini | gemini-2.5-flash | 1320.0 | 3795.0 | 31296.0 |
+| 2026-06-22 02:16:44 | gemini | gemini-2.5-flash | 5153.0 | 7146.0 | 7181.0 |

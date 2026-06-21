@@ -153,9 +153,53 @@ class VADEngine extends EventEmitter {
             const sorted = [...this.history].sort((a,b) => a - b);
             this.noiseFloor = sorted[Math.floor(sorted.length * 0.1)] || 0.005;
             
-            const threshold = this.noiseFloor + this.sensitivity;
+            // Check if TTS is actively playing
+            const isTtsPlaying = window.ttsPipeline && window.ttsPipeline.isPlaying;
+            
+            // Ignore speaker echo / tts playback leakage by raising threshold dynamically
+            const echoMargin = isTtsPlaying ? 0.025 : 0.0;
+            const threshold = this.noiseFloor + this.sensitivity + echoMargin;
             this.emit("volume", { rms, threshold });
             
+            // User Interruption Detection logic
+            if (isTtsPlaying) {
+                if (rms > threshold) {
+                    this.consecutiveInterruptionSpeechFrames = (this.consecutiveInterruptionSpeechFrames || 0) + 1;
+                    this.consecutiveInterruptionSilenceFrames = 0;
+                    
+                    // Calculate frame VAD confidence based on signal strength excess
+                    const excess = rms - threshold;
+                    const frameConfidence = Math.min(100, Math.max(0, Math.round((excess / (threshold || 0.001)) * 100)));
+                    this.interruptionConfidenceSum = (this.interruptionConfidenceSum || 0) + frameConfidence;
+                    
+                    // Duration threshold: must sustain speech for ~270ms (6 frames)
+                    const triggerFrames = 6;
+                    if (this.consecutiveInterruptionSpeechFrames >= triggerFrames) {
+                        const avgConfidence = Math.round(this.interruptionConfidenceSum / this.consecutiveInterruptionSpeechFrames);
+                        if (avgConfidence > 15) {
+                            this.emit("user.interrupted", {
+                                rms,
+                                threshold,
+                                confidence: avgConfidence,
+                                timestamp: Date.now()
+                            });
+                        }
+                    }
+                } else {
+                    this.consecutiveInterruptionSilenceFrames = (this.consecutiveInterruptionSilenceFrames || 0) + 1;
+                    if (this.consecutiveInterruptionSilenceFrames >= 3) {
+                        this.consecutiveInterruptionSpeechFrames = 0;
+                        this.interruptionConfidenceSum = 0;
+                    }
+                }
+            } else {
+                // Reset interruption state when not playing
+                this.consecutiveInterruptionSpeechFrames = 0;
+                this.consecutiveInterruptionSilenceFrames = 0;
+                this.interruptionConfidenceSum = 0;
+            }
+            
+            // Standard VAD logic
             if (rms > threshold) {
                 this.consecutiveSilenceFrames = 0;
                 this.consecutiveSpeechFrames++;
@@ -812,6 +856,10 @@ class TTSPipeline extends EventEmitter {
                 window.addEventListener("keydown", forceUnlockAndPlay);
                 window.addEventListener("touchstart", forceUnlockAndPlay);
             } else {
+                if (e.name === 'AbortError') {
+                    console.log("[AUDIO] Playback aborted via pause() interruption.");
+                    return;
+                }
                 console.error("Playback execution failed:", e);
                 if (currentReady.audioUrl && currentReady.audioUrl.startsWith("blob:")) {
                     try { URL.revokeObjectURL(currentReady.audioUrl); } catch (err) {}
@@ -939,13 +987,46 @@ class VoiceSessionManager extends EventEmitter {
         this.vad.on("speech.start", () => {
             this.resetInactivityTimer();
             if (this.state === "speaking") {
-                this.tts.interrupt();
-                addLog("[SYSTEM] Vocal interruption detected.", "system");
-                this.state = "listening";
-                this.updateHUDState("listening");
+                // In Phase 5E-A, we do not interrupt playback or transition state here.
+                addLog("[SYSTEM] Speech energy started during playback.", "system");
             } else if (this.state === "idle" || this.state === "listening") {
                 this.state = "listening";
                 this.updateHUDState("listening");
+            }
+        });
+        
+        this.vad.on("user.interrupted", (data) => {
+            if (this.state === "speaking" || this.state === "UserInterruptDetected") {
+                const triggerTime = Date.now();
+                
+                // Cut off TTS playback and queued sentences instantly!
+                this.tts.interrupt();
+                const stopLatency = Date.now() - triggerTime;
+                
+                // Transition state to SpeechInterrupted
+                this.state = "SpeechInterrupted";
+                this.updateHUDState("SpeechInterrupted");
+                
+                const timeStr = new Date(data.timestamp).toLocaleTimeString();
+                addLog(`[INTERRUPT] User speech detected! Confidence: ${data.confidence}%, RMS: ${data.rms.toFixed(4)}`, "warning");
+                addLog(`[INTERRUPT] Speech stop latency: ${stopLatency}ms`, "info");
+                
+                // Update HUD elements
+                const eStatus = document.getElementById("interruption-status");
+                const eConf = document.getElementById("interruption-confidence");
+                const eTime = document.getElementById("interruption-timestamp");
+                if (eStatus) {
+                    eStatus.textContent = "CUTOFF";
+                    eStatus.style.color = "#ff3b30"; // Red
+                }
+                if (eConf) {
+                    eConf.textContent = `${data.confidence}%`;
+                    eConf.style.color = "#ff9500"; // Orange
+                }
+                if (eTime) {
+                    eTime.textContent = timeStr;
+                    eTime.style.color = "#ffffff";
+                }
             }
         });
         
@@ -1001,12 +1082,51 @@ class VoiceSessionManager extends EventEmitter {
         });
         
         this.tts.on("play.end", () => {
+            if (this.mode !== "auto-wake") {
+                this.stopMicStream();
+            }
+            
+            // Clean up interruption status on end
+            const eStatus = document.getElementById("interruption-status");
+            if (eStatus && eStatus.textContent === "DETECTED") {
+                eStatus.textContent = "CLEARED";
+                eStatus.style.color = "#00f0ff"; // Reset cyan
+            }
+            
             this.returnToListeningOrIdle();
+        });
+        
+        this.tts.on("interrupted", () => {
+            if (this.mode !== "auto-wake") {
+                this.stopMicStream();
+            }
         });
         
         this.tts.on("play.start", () => {
             this.state = "speaking";
             this.updateHUDState("speaking");
+            
+            // Ensure mic stream runs to capture interruptions (even in manual mode)
+            if (!this.vad.micStream) {
+                this.startMicStream();
+            }
+            
+            // Reset interruption stats for the new segment
+            const eStatus = document.getElementById("interruption-status");
+            const eConf = document.getElementById("interruption-confidence");
+            const eTime = document.getElementById("interruption-timestamp");
+            if (eStatus) {
+                eStatus.textContent = "NONE";
+                eStatus.style.color = "#808080";
+            }
+            if (eConf) {
+                eConf.textContent = "0%";
+                eConf.style.color = "#808080";
+            }
+            if (eTime) {
+                eTime.textContent = "--";
+                eTime.style.color = "#808080";
+            }
         });
         
         this.on("stt.complete", (text) => {
@@ -1046,7 +1166,7 @@ class VoiceSessionManager extends EventEmitter {
     
     resetInactivityTimer() {
         clearTimeout(this.inactivityTimer);
-        if (this.mode === "auto-wake" && this.state !== "processing" && this.state !== "speaking") {
+        if (this.mode === "auto-wake" && this.state !== "processing" && this.state !== "speaking" && this.state !== "UserInterruptDetected" && this.state !== "SpeechInterrupted") {
             this.inactivityTimer = setTimeout(async () => {
                 this.state = "idle";
                 this.updateHUDState("idle");
@@ -1066,6 +1186,8 @@ class VoiceSessionManager extends EventEmitter {
             else if (state === "listening") hudStateSpan.style.color = "#00f0ff";
             else if (state === "processing") hudStateSpan.style.color = "#a000ff";
             else if (state === "speaking") hudStateSpan.style.color = "#00f0ff";
+            else if (state === "UserInterruptDetected") hudStateSpan.style.color = "#ff3b30";
+            else if (state === "SpeechInterrupted") hudStateSpan.style.color = "#ff9500"; // Orange
         }
         
         if (typeof setUIState === 'function') {
@@ -1073,6 +1195,8 @@ class VoiceSessionManager extends EventEmitter {
             else if (state === "listening") setUIState("listening", "LISTENING (AUTO-WAKE)");
             else if (state === "processing") setUIState("thinking", "PROCESSING PATHWAYS");
             else if (state === "speaking") setUIState("speaking", "TRANSMITTING SPEECH");
+            else if (state === "UserInterruptDetected") setUIState("speaking", "INTERRUPTION DETECTED");
+            else if (state === "SpeechInterrupted") setUIState("standby", "SPEECH INTERRUPTED");
         }
     }
 }

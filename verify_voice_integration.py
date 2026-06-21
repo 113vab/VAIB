@@ -97,23 +97,31 @@ def run_verification():
                 report.append("VAD State Transition: FAILED")
 
             # --- TEST 5: Interruptible Speech TTS Interrupt ---
-            print("\nVerification 5: Verifying Interruptible TTS Playback Interruption...")
+            print("\nVerification 5: Verifying Interruption Detection (Phase 5E-A)...")
             # Set manager state to speaking to simulate active Edge-TTS play
             page.evaluate("window.voiceSessionManager.state = 'speaking'")
             
-            # Emit speech.start event which should interrupt TTS and return to listening
-            page.evaluate("window.vadEngine.emit('speech.start')")
+            # Emit user.interrupted event to simulate user speech interruption
+            page.evaluate("""
+                window.vadEngine.emit('user.interrupted', {
+                    rms: 0.08,
+                    threshold: 0.03,
+                    confidence: 85,
+                    timestamp: Date.now()
+                })
+            """)
             time.sleep(0.5)
             
             state_after_interrupt = page.evaluate("window.voiceSessionManager.state")
-            print(f"State after VAD interrupt event: '{state_after_interrupt}'")
+            status_text = page.locator("#interruption-status").inner_text()
+            print(f"State after interruption event: '{state_after_interrupt}', HUD status: '{status_text}'")
             
-            if state_after_interrupt == "listening":
+            if state_after_interrupt == "SpeechInterrupted" and status_text == "CUTOFF":
                 tests_passed += 1
-                report.append("Interruptible TTS: PASSED")
+                report.append("Interruption Detection: PASSED")
             else:
-                print("FAIL: State did not interrupt speaking state to return to listening.")
-                report.append("Interruptible TTS: FAILED")
+                print(f"FAIL: Interruption not detected properly. State: {state_after_interrupt}, Status: {status_text}")
+                report.append("Interruption Detection: FAILED")
 
             browser.close()
 
